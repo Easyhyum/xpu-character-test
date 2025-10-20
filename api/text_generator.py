@@ -3,7 +3,8 @@ Text generation utilities with activation tracking for the XPU character test pr
 """
 
 import torch
-
+import gc
+import time
 
 def create_activation_hook(layer_name, activations_dict):
     """
@@ -47,7 +48,7 @@ def generate_with_activations(model, tokenizer, inputs, device, max_new_tokens, 
     # Get transformer layers and eos token
     transformer_layers = model.model.layers
     eos_token_id = tokenizer.eos_token_id
-    
+    init_time = time.time()
     for step in range(max_new_tokens):
         step_activations = {}
         hooks = []
@@ -94,5 +95,13 @@ def generate_with_activations(model, tokenizer, inputs, device, max_new_tokens, 
         # Check for EOS
         if next_token_id.item() == eos_token_id:
             break
+    end_time = time.time()
+    print(f"\ntotal steps: {step+1}, tps: {(step+1)/(end_time - init_time):.2f}, total seconds: {end_time - init_time:.2f}")
     print()
+    
+    # 생성 완료 후 중간 변수들 메모리 정리
+    del next_token_logits, outputs
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    gc.collect()
+    
     return generated_ids, all_step_activations

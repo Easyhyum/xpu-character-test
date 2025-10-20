@@ -180,7 +180,9 @@ checkpoints/
 
 # Log files
 *.log
+*.csv
 logs/
+outputs/
 
 # Temporary files
 *.tmp

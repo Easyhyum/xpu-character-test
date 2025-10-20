@@ -6,6 +6,7 @@ import random
 import os, time
 import contextlib
 import json
+import gc
 from api import model_load_function, generate_with_activations, create_activation_hook
 
 def set_deterministic_mode(seed=42):
@@ -39,6 +40,8 @@ elif torch.backends.mps.is_available():
     special_device = torch.device("mps")
 else:
     special_device = None
+
+print(f"Available special device: {special_device}")
 
 with open("hyperparameter.json", "r") as f:
     hyperparams = json.load(f)
@@ -103,6 +106,12 @@ def save_activations_to_csv(all_activations, csv_file_path, model_hidden_size, t
                     row = [i, step, token_id, token_text]
                     row.extend([f"{val:.8f}" for val in activation_flat])
                     writer.writerow(row)
+                    
+                    # 즉시 메모리에서 activation 제거
+                    del activation, activation_flat
+    
+    # CSV 저장 완료 후 메모리 정리
+    gc.collect()
 
 def save_activation_differences_to_csv(all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers):
     """
@@ -160,6 +169,7 @@ def main():
             print(f"Skipping model {model_name} due to loading failure")
             continue
         print(f"\nModel: {model_specific}")
+        input_index = 0
         for messages in inputs:
             tokenized_chat = tokenizer(messages,return_tensors="pt")
             print(f"Input: {messages}")
@@ -184,8 +194,10 @@ def main():
                         model, tokenizer, tokenized_inputs, special_device, max_new_tokens, temperature=0.0
                     )
                     device_result = True
-                    # Delete Model from device
+                    # Delete Model from device and clear GPU memory
                     model = model.to(cpu_device)
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                    gc.collect()
                 except Exception as e:
                     print(f"Error during generation on {special_device.type}: {e}")
                     all_special_activations = []
@@ -202,11 +214,14 @@ def main():
                         model, tokenizer, tokenized_inputs, cpu_device, max_new_tokens, temperature=0.0
                     )
                     cpu_result = True
+                    # CPU 생성 후에도 메모리 정리
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                    gc.collect()
                 except Exception as e:
                     print(f"Error during generation on CPU: {e}")
                     all_cpu_activations = []
 
-            cpu_csv_file = f"{output_dir}/{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
+            cpu_csv_file = f"{output_dir}/{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
             if cpu_result and all_cpu_activations:
                 save_activations_to_csv(all_cpu_activations, cpu_csv_file, model_hidden_size, transformer_layers)
                 # print(f"CPU activations saved to: {cpu_csv_file}")
@@ -216,11 +231,28 @@ def main():
                     # print("\n--- Comparing CPU vs Special Device Activations ---")
                     
                     # Save differences to CSV
-                    diff_csv_file = f"{output_dir}/{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
+                    diff_csv_file = f"{output_dir}/{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
                     total_diff_sum = save_activation_differences_to_csv(
                         all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers
                     )
-
+            input_index += 1
+            # 각 입력 처리 후 메모리 정리
+            del all_cpu_activations, all_special_activations
+            if 'cpu_generated' in locals():
+                del cpu_generated
+            if 'special_generated' in locals():
+                del special_generated
+            if 'tokenized_inputs' in locals():
+                del tokenized_inputs
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            gc.collect()
+            
+        # 각 모델 완료 후 모델과 토크나이저 메모리 해제
+        print(f"Cleaning up model {model_specific}...")
+        del model, tokenizer
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
+        print(f"✓ Model {model_specific} memory cleaned")
 
 
 if __name__ == "__main__":

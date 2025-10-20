@@ -15,7 +15,6 @@ COPY run.py /workspace/
 COPY api/ /workspace/api/
 
 COPY hyperparameter.json /workspace/
-COPY git_init.sh /workspace/
 COPY run.sh /workspace/
 
 RUN pip3 install -r requirements.txt

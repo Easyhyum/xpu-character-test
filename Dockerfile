@@ -15,11 +15,13 @@ COPY run.py /workspace/
 COPY api/ /workspace/api/
 
 COPY hyperparameter.json /workspace/
+COPY git_init.sh /workspace/
 COPY run.sh /workspace/
 
 RUN pip3 install -r requirements.txt
 
 RUN chmod +x /workspace/run.sh
+RUN chmod +x /workspace/git_init.sh
 
 # 인터랙티브 bash 쉘로 시작
 CMD ["/bin/bash"]

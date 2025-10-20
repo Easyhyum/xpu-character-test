@@ -204,7 +204,7 @@ def main():
 
             if device_result and special_device and all_special_activations:
                 # print("\n--- Saving Special Device Activations to CSV ---")
-                special_csv_file = f"{output_dir}/{model_specific}_{special_device.type}_{model_specific}_activations_per_step_{start_time}.csv"
+                special_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step.csv"
                 save_activations_to_csv(all_special_activations, special_csv_file, model_hidden_size, transformer_layers)
                 # print(f"Special device activations saved to: {special_csv_file}")
             if cpu_enable:
@@ -221,7 +221,7 @@ def main():
                     print(f"Error during generation on CPU: {e}")
                     all_cpu_activations = []
 
-            cpu_csv_file = f"{output_dir}/{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
+            cpu_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step.csv"
             if cpu_result and all_cpu_activations:
                 save_activations_to_csv(all_cpu_activations, cpu_csv_file, model_hidden_size, transformer_layers)
                 # print(f"CPU activations saved to: {cpu_csv_file}")
@@ -231,7 +231,7 @@ def main():
                     # print("\n--- Comparing CPU vs Special Device Activations ---")
                     
                     # Save differences to CSV
-                    diff_csv_file = f"{output_dir}/{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
+                    diff_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
                     total_diff_sum = save_activation_differences_to_csv(
                         all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers
                     )

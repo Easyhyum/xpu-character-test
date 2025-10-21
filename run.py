@@ -7,6 +7,7 @@ import os, time
 import contextlib
 import json
 import gc
+import subprocess
 from api import model_load_function, generate_with_activations, create_activation_hook
 
 def set_deterministic_mode(seed=42):
@@ -71,6 +72,24 @@ else:
     start_time = time.strftime("%Y%m%d-%H%M%S")
 
 print(f"Run start_time: {start_time}")
+
+def get_gpu_name():
+    """
+    Get GPU name using nvidia-smi command.
+    
+    Returns:
+        str: GPU name or 'CPU' if no GPU available
+    """
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except:
+        return 'CPU'
 
 def save_activations_to_csv(all_activations, csv_file_path, model_hidden_size, transformer_layers):
     """
@@ -157,8 +176,37 @@ def save_activation_differences_to_csv(all_cpu_activations, all_special_activati
                     
     return total_diff_sum
 
+def save_input_output_csv(model_name, gpu_name, input_text, output_text, csv_file_path):
+    """
+    Save or append model input and output to CSV file.
+    
+    Args:
+        model_name: Name of the model
+        gpu_name: Name of the GPU
+        input_text: Input sentence
+        output_text: Output sentence
+        csv_file_path: Path to the CSV file
+    """
+    file_exists = os.path.isfile(csv_file_path)
+    
+    with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        
+        # Write header only if file doesn't exist
+        if not file_exists:
+            writer.writerow(["Model", "GPU", "Input", "Output"])
+        
+        # Write data
+        writer.writerow([model_name, gpu_name, input_text, output_text])
+
 def main():
-    """Main execution function."""    
+    """Main execution function."""
+    # Get GPU name once at the start
+    gpu_name = get_gpu_name()
+    print(f"GPU Name: {gpu_name}")
+    
+    # Create input-output CSV file path
+    io_csv_file = f"{output_dir}/{start_time}/{gpu_name}_input_output_summary_{start_time}.csv"
     for model_name in model_list:
         model_specific = model_name.split("/")[-1].lower()
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -187,6 +235,7 @@ def main():
             eos_token_id = tokenizer.eos_token_id
 
             # Generate with Special Device
+            special_generated = None
             if special_device:
                 try:
                     print(f"{special_device.type:10s} Generating: ", end='', flush=True)
@@ -194,6 +243,12 @@ def main():
                         model, tokenizer, tokenized_inputs, special_device, max_new_tokens, temperature=0.0
                     )
                     device_result = True
+                    
+                    # Save input-output to CSV
+                    if special_generated is not None:
+                        output_text = tokenizer.decode(special_generated[0], skip_special_tokens=True)
+                        save_input_output_csv(model_name, gpu_name, messages, output_text, io_csv_file)
+                    
                     # Delete Model from device and clear GPU memory
                     model = model.to(cpu_device)
                     torch.cuda.empty_cache() if torch.cuda.is_available() else None
@@ -204,7 +259,7 @@ def main():
 
             if device_result and special_device and all_special_activations:
                 # print("\n--- Saving Special Device Activations to CSV ---")
-                special_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step.csv"
+                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step_{start_time}.csv"
                 save_activations_to_csv(all_special_activations, special_csv_file, model_hidden_size, transformer_layers)
                 # print(f"Special device activations saved to: {special_csv_file}")
             if cpu_enable:
@@ -221,7 +276,7 @@ def main():
                     print(f"Error during generation on CPU: {e}")
                     all_cpu_activations = []
 
-            cpu_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step.csv"
+            cpu_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
             if cpu_result and all_cpu_activations:
                 save_activations_to_csv(all_cpu_activations, cpu_csv_file, model_hidden_size, transformer_layers)
                 # print(f"CPU activations saved to: {cpu_csv_file}")
@@ -231,7 +286,7 @@ def main():
                     # print("\n--- Comparing CPU vs Special Device Activations ---")
                     
                     # Save differences to CSV
-                    diff_csv_file = f"{output_dir}/{start_time}/{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
+                    diff_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
                     total_diff_sum = save_activation_differences_to_csv(
                         all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers
                     )

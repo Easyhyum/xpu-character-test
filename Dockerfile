@@ -1,6 +1,5 @@
 # FROM nvcr.io/nvidia/l4t-ml:r36.2.0-py3
-FROM nvcr.io/nvidia/pytorch:23.10-py3
-# FROM nvcr.io/nvidia/pytorch:25.08-py3
+FROM nvcr.io/nvidia/pytorch:25.08-py3
 
 WORKDIR /workspace
 RUN rm -rf *

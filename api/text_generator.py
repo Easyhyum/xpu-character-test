@@ -81,7 +81,9 @@ def generate_with_activations(model, tokenizer, inputs, device, max_new_tokens, 
         
         # Decode and print the new token immediately
         new_token_text = tokenizer.decode(next_token_id[0], skip_special_tokens=False)
-        print(new_token_text, end='', flush=True)  # Print without newline, flush immediately
+        # Replace newlines with visible \n representation
+        display_text = new_token_text.replace('\n', ' \\n ')
+        print(display_text, end='', flush=True)  # Print without newline, flush immediately
         
         # Store activations with step info
         step_activations['step'] = step

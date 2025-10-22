@@ -262,7 +262,6 @@ def main():
                 gpu_name=gpu_name,
                 model_specific=model_specific,
                 batch_start_idx=batch_start,
-                batch_size=batch_size
             )
             
             # 결과 출력 및 저장

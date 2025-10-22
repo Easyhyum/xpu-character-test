@@ -73,7 +73,7 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     return generated_texts
 
 
-def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx, batch_size):
+def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx):
     """Activation 추적을 포함한 배치 처리 - 배치 단위로 디코딩하고 input별로 activation 저장"""
     
     # 모델 정보 가져오기

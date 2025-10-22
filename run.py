@@ -135,7 +135,7 @@ def main():
             special_generated = None
             if special_device:
                 # CSV 파일 먼저 열고 헤더 작성
-                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step_{start_time}.csv"
+                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_activations_per_step_{start_time}.csv"
                 
                 try:
                     with open(special_csv_file, "w", newline='') as f:

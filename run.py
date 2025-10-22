@@ -74,12 +74,6 @@ else:
 print(f"Run start_time: {start_time}")
 
 def get_gpu_name():
-    """
-    Get GPU name using nvidia-smi command.
-    
-    Returns:
-        str: GPU name or 'CPU' if no GPU available
-    """
     try:
         result = subprocess.run(
             ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
@@ -91,104 +85,9 @@ def get_gpu_name():
     except:
         return 'CPU'
 
-def save_activations_to_csv(all_activations, csv_file_path, model_hidden_size, transformer_layers):
-    """
-    Save activations data to CSV file.
-    
-    Args:
-        all_activations: List of step activation data
-        csv_file_path: Path to save the CSV file
-        model_hidden_size: Size of the hidden layer
-        transformer_layers: List of transformer layers
-    """
-    with open(csv_file_path, "w", newline='') as f:
-        writer = csv.writer(f)
-        
-        # Write header
-        header = ["layer", "decoding_step", "token_id", "token_text"]
-        for col in range(model_hidden_size):
-            header.append(f"hidden_col_{col}")
-        writer.writerow(header)
-        
-        # Write data for each step and layer
-        for step_data in all_activations:
-            step = step_data['step']
-            token_id = step_data['token_id']
-            token_text = step_data['token_text'].replace('\n', '\\n').replace(',', '[COMMA]')
-            
-            for i in range(len(transformer_layers)):
-                layer_name = f"layer_{i}"
-                if layer_name in step_data:
-                    activation = step_data[layer_name].cpu().numpy()  # Shape: [1, 1, hidden_size]
-                    activation_flat = activation.flatten()  # Flatten to [hidden_size]
-                    
-                    row = [i, step, token_id, token_text]
-                    row.extend([f"{val:.8f}" for val in activation_flat])
-                    writer.writerow(row)
-                    
-                    # 즉시 메모리에서 activation 제거
-                    del activation, activation_flat
-    
-    # CSV 저장 완료 후 메모리 정리
-    gc.collect()
-
-def save_activation_differences_to_csv(all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers):
-    """
-    Save activation differences between CPU and special device to CSV file.
-    
-    Args:
-        all_cpu_activations: CPU activations data
-        all_special_activations: Special device activations data
-        diff_csv_file: Path to save the differences CSV file
-        model_hidden_size: Size of the hidden layer
-        transformer_layers: List of transformer layers
-        
-    Returns:
-        float: Total cumulative difference
-    """
-    with open(diff_csv_file, "w", newline='') as f:
-        writer = csv.writer(f)
-        
-        header = ["layer", "decoding_step", "mean_abs_diff", "max_abs_diff"]
-        for col in range(model_hidden_size):
-            header.append(f"col_{col}_diff")
-        writer.writerow(header)
-        
-        total_diff_sum = 0
-        for step_idx in range(len(all_cpu_activations)):
-            cpu_step = all_cpu_activations[step_idx]
-            special_step = all_special_activations[step_idx]
-            
-            for i in range(len(transformer_layers)):
-                layer_name = f"layer_{i}"
-                if layer_name in cpu_step and layer_name in special_step:
-                    cpu_act = cpu_step[layer_name].cpu().numpy()
-                    special_act = special_step[layer_name].cpu().numpy()
-                    
-                    abs_diff = np.abs(cpu_act - special_act)
-                    mean_diff = np.mean(abs_diff)
-                    max_diff = np.max(abs_diff)
-                    total_diff_sum += mean_diff
-                    
-                    row = [i, step_idx, f"{mean_diff:.8f}", f"{max_diff:.8f}"]
-                    row.extend([f"{val:.8f}" for val in abs_diff.flatten()])
-                    writer.writerow(row)
-                    
-    return total_diff_sum
-
 def save_input_output_csv(model_name, gpu_name, input_text, output_text, csv_file_path):
-    """
-    Save or append model input and output to CSV file.
-    
-    Args:
-        model_name: Name of the model
-        gpu_name: Name of the GPU
-        input_text: Input sentence
-        output_text: Output sentence
-        csv_file_path: Path to the CSV file
-    """
+
     file_exists = os.path.isfile(csv_file_path)
-    
     with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         
@@ -200,8 +99,6 @@ def save_input_output_csv(model_name, gpu_name, input_text, output_text, csv_fil
         writer.writerow([model_name, gpu_name, input_text, output_text])
 
 def main():
-    """Main execution function."""
-    # Get GPU name once at the start
     gpu_name = get_gpu_name()
     print(f"GPU Name: {gpu_name}")
     
@@ -209,6 +106,7 @@ def main():
     io_csv_file = f"{output_dir}/{start_time}/{gpu_name}_input_output_summary_{start_time}.csv"
     for model_name in model_list:
         model_specific = model_name.split("/")[-1].lower()
+        
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         
         # Use the custom model loading function
@@ -216,18 +114,17 @@ def main():
         if model is None:
             print(f"Skipping model {model_name} due to loading failure")
             continue
+        
         print(f"\nModel: {model_specific}")
         input_index = 0
         for messages in inputs:
+            # 입력 처리 전 메모리 상태
+            
             tokenized_chat = tokenizer(messages,return_tensors="pt")
             print(f"Input: {messages}")
             
-            device_result = False
-            cpu_result = False
 
             tokenized_inputs = tokenized_chat
-            all_cpu_activations = []
-            all_special_activations = []
 
             transformer_layers = model.model.layers
             model_hidden_size = model.config.hidden_size
@@ -237,12 +134,25 @@ def main():
             # Generate with Special Device
             special_generated = None
             if special_device:
+                # CSV 파일 먼저 열고 헤더 작성
+                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step_{start_time}.csv"
+                
                 try:
-                    print(f"{special_device.type:10s} Generating: ", end='', flush=True)
-                    special_generated, all_special_activations = generate_with_activations(
-                        model, tokenizer, tokenized_inputs, special_device, max_new_tokens, temperature=0.0
-                    )
-                    device_result = True
+                    with open(special_csv_file, "w", newline='') as f:
+                        writer = csv.writer(f)
+                        
+                        # Write header
+                        header = ["device","model", "type", "index", "input", "layer", "decoding_step", "token_id", "token_text"]
+                        for col in range(model_hidden_size):
+                            header.append(f"hidden_col_{col}")
+                        writer.writerow(header)
+                        
+                        print(f"{special_device.type:10s} Generating: ", end='', flush=True)
+                        special_generated, step_count = generate_with_activations(
+                            input_index, gpu_name, model_specific, model, messages, tokenizer, tokenized_inputs, special_device, max_new_tokens, 
+                            temperature=0.0, csv_writer=writer, 
+                            model_hidden_size=model_hidden_size, num_layers=len(transformer_layers)
+                        )
                     
                     # Save input-output to CSV
                     if special_generated is not None:
@@ -255,44 +165,36 @@ def main():
                     gc.collect()
                 except Exception as e:
                     print(f"Error during generation on {special_device.type}: {e}")
-                    all_special_activations = []
 
-            if device_result and special_device and all_special_activations:
-                # print("\n--- Saving Special Device Activations to CSV ---")
-                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_{special_device.type}_{model_specific}_activations_per_step_{start_time}.csv"
-                save_activations_to_csv(all_special_activations, special_csv_file, model_hidden_size, transformer_layers)
-                # print(f"Special device activations saved to: {special_csv_file}")
             if cpu_enable:
+                # CPU용 CSV 파일 먼저 열고 헤더 작성
+                cpu_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
+                
                 try:
-                    print(f"{'cpu':10s} Generating: ", end='', flush=True)
-                    cpu_generated, all_cpu_activations = generate_with_activations(
-                        model, tokenizer, tokenized_inputs, cpu_device, max_new_tokens, temperature=0.0
-                    )
+                    with open(cpu_csv_file, "w", newline='') as f:
+                        writer = csv.writer(f)
+                        
+                        # Write header
+                        header = ["layer", "decoding_step", "token_id", "token_text"]
+                        for col in range(model_hidden_size):
+                            header.append(f"hidden_col_{col}")
+                        writer.writerow(header)
+                        
+                        print(f"{'cpu':10s} Generating: ", end='', flush=True)
+                        cpu_generated, step_count = generate_with_activations(
+                            model, tokenizer, tokenized_inputs, cpu_device, max_new_tokens, 
+                            temperature=0.0, csv_writer=writer,
+                            model_hidden_size=model_hidden_size, num_layers=len(transformer_layers)
+                        )
                     cpu_result = True
                     # CPU 생성 후에도 메모리 정리
                     torch.cuda.empty_cache() if torch.cuda.is_available() else None
                     gc.collect()
                 except Exception as e:
                     print(f"Error during generation on CPU: {e}")
-                    all_cpu_activations = []
+                    cpu_result = False
 
-            cpu_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
-            if cpu_result and all_cpu_activations:
-                save_activations_to_csv(all_cpu_activations, cpu_csv_file, model_hidden_size, transformer_layers)
-                # print(f"CPU activations saved to: {cpu_csv_file}")
-
-                # Compare activations if both are available
-                if device_result and special_device and all_special_activations and len(all_cpu_activations) == len(all_special_activations):
-                    # print("\n--- Comparing CPU vs Special Device Activations ---")
-                    
-                    # Save differences to CSV
-                    diff_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_vs_{special_device.type}_{model_specific}_activation_differences.csv"
-                    total_diff_sum = save_activation_differences_to_csv(
-                        all_cpu_activations, all_special_activations, diff_csv_file, model_hidden_size, transformer_layers
-                    )
-            input_index += 1
             # 각 입력 처리 후 메모리 정리
-            del all_cpu_activations, all_special_activations
             if 'cpu_generated' in locals():
                 del cpu_generated
             if 'special_generated' in locals():
@@ -301,13 +203,19 @@ def main():
                 del tokenized_inputs
             torch.cuda.empty_cache() if torch.cuda.is_available() else None
             gc.collect()
-            
-        # 각 모델 완료 후 모델과 토크나이저 메모리 해제
-        print(f"Cleaning up model {model_specific}...")
+            input_index += 1
+
+        model = model.cpu()
+        
         del model, tokenizer
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            torch.cuda.ipc_collect()
+    
         gc.collect()
-        print(f"✓ Model {model_specific} memory cleaned")
+
 
 
 if __name__ == "__main__":

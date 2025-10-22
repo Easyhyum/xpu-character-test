@@ -7,15 +7,6 @@ import torch
 
 
 def model_load_function(model_name):
-    """
-    Load a model with specific configurations based on the model name.
-    
-    Args:
-        model_name (str): The name/path of the model to load
-        
-    Returns:
-        model: The loaded model instance, or None if loading fails
-    """
     print(f"Loading model: {model_name}")
     
     try:
@@ -61,6 +52,8 @@ def model_load_function(model_name):
                     model_name,
                     trust_remote_code=True,
                     attn_implementation="eager",
+                    device_map=None,  # CPU에 먼저 로드
+                    low_cpu_mem_usage=True,
                 )
                 
                 # After loading, replace forward method for INT8 quantized layers

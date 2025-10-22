@@ -1,10 +1,17 @@
 {
     "max_new_tokens": 50,
     "cpu": "Disable",
+    "batch_size": 1,
+    "decoding_number": 1,
     "models": [
         "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
     ],
     "inputs": [
         "Hello, how are you?"
-    ]
+    ],
+    "dataset": {
+        "name": "HuggingFaceH4/ultrachat_200k",
+        "split": "test_sft",
+        "num_samples": 1024
+    }
 }

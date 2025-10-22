@@ -8,43 +8,100 @@ import contextlib
 import json
 import gc
 import subprocess
-from api import model_load_function, generate_with_activations, create_activation_hook
-from datasets import load_dataset
+from api import model_load_function, generate_with_activations, create_activation_hook, process_batch_inference
+from datasets import load_dataset, load_from_disk, disable_caching
 import traceback
 
-# Load dataset - using HuggingFaceH4/ultrachat_200k which is widely used and well-maintained
+# datasets 캐시를 완전히 비활성화하여 cache*.arrow 파일 생성 방지
+disable_caching()
 
-print("Loading dataset...")
-ds = load_dataset("HuggingFaceH4/ultrachat_200k", split="test_sft[:1024]")
-ds_processed = ds_processed.filter(lambda x: len(x['prompt_text']) <= 250)
-print(f"✓ Dataset loaded successfully: {len(ds)} examples")
-print(f"  Features: {list(ds.features.keys())}")
+# Load dataset configuration from hyperparameter.json
+print("Loading configuration...")
+with open("hyperparameter.json", "r") as f:
+    config = json.load(f)
 
-# Step 1: 데이터셋 전처리 함수
-def format_messages_for_inference(example):
-    """
-    데이터셋의 messages를 모델 입력 형태로 변환
-    example['messages']는 [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}] 형태
-    """
-    # messages에서 user와 assistant의 대화를 추출
-    messages = example['messages']
+dataset_config = config.get('dataset', {})
+dataset_name = dataset_config.get('name', 'HuggingFaceH4/ultrachat_200k')
+dataset_split = dataset_config.get('split', 'test_sft')
+dataset_num_samples = dataset_config.get('num_samples', 1024)
+
+print(f"Dataset configuration:")
+print(f"  Name: {dataset_name}")
+print(f"  Split: {dataset_split}")
+print(f"  Num samples: {dataset_num_samples}")
+
+# 로컬 캐시 경로 생성 (전처리된 데이터셋 경로)
+dataset_name_clean = dataset_name.replace('/', '_')
+local_dataset_path = f"./datas/{dataset_name_clean}_{dataset_split}_{dataset_num_samples}_processed"
+
+print("\nLoading dataset...")
+# 전처리된 데이터셋이 있는지 확인
+if os.path.exists(local_dataset_path):
+    print(f"  Loading preprocessed dataset from cache: {local_dataset_path}")
+    ds_processed = load_from_disk(local_dataset_path)
+    print(f"✓ Preprocessed dataset loaded successfully: {len(ds_processed)} examples")
+else:
+    print(f"  Downloading from HuggingFace: {dataset_name}")
+    # split과 num_samples를 결합하여 다운로드
+    full_split = f"{dataset_split}[:{dataset_num_samples}]"
+    ds = load_dataset(dataset_name, split=full_split)
     
-    # user의 첫 번째 메시지만 사용 (prompt로)
-    user_messages = [msg for msg in messages if msg['role'] == 'user']
-    if user_messages:
-        return {'prompt_text': user_messages[0]['content']}
-    else:
-        return {'prompt_text': example.get('prompt', '')}
+    print(f"✓ Dataset loaded successfully: {len(ds)} examples")
+    print(f"  Features: {list(ds.features.keys())}")
 
-print("\n[Step 1] Processing dataset for inference...")
-# 데이터셋에 전처리 적용
-ds_processed = ds.map(format_messages_for_inference)
+    # Step 1: 데이터셋 전처리 함수
+    def format_messages_for_inference(example):
+        """
+        데이터셋의 messages를 모델 입력 형태로 변환
+        example['messages']는 [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}] 형태
+        """
+        # messages에서 user와 assistant의 대화를 추출
+        messages = example['messages']
+        
+        # user의 첫 번째 메시지만 사용 (prompt로)
+        user_messages = [msg for msg in messages if msg['role'] == 'user']
+        if user_messages:
+            return {'prompt_text': user_messages[0]['content']}
+        else:
+            return {'prompt_text': example.get('prompt', '')}
 
-# Step 1.5: 길이가 250 이하인 데이터만 필터링
-print("\n[Step 1.5] Filtering dataset by length (≤ 250 characters)...")
-original_size = len(ds_processed)
-ds_processed = ds_processed.filter(lambda x: len(x['prompt_text']) <= 250)
-print(f"✓ Filtered: {original_size} → {len(ds_processed)} examples (removed {original_size - len(ds_processed)})")
+    print("\n[Step 1] Processing dataset for inference...")
+    ds_processed = ds.map(format_messages_for_inference)
+
+    # Step 1.5: 길이가 250 이하인 데이터만 필터링
+    print("\n[Step 1.5] Filtering dataset by length (≤ 250 characters)...")
+    original_size = len(ds_processed)
+    ds_processed = ds_processed.filter(lambda x: len(x['prompt_text']) <= 250)
+    print(f"✓ Filtered: {original_size} → {len(ds_processed)} examples (removed {original_size - len(ds_processed)})")
+    
+    # 전처리된 데이터셋 저장
+    print(f"\n  Saving preprocessed dataset: {local_dataset_path}")
+    os.makedirs(os.path.dirname(local_dataset_path), exist_ok=True)
+    ds_processed.save_to_disk(local_dataset_path)
+    print(f"✓ Preprocessed dataset saved")
+
+# hyperparameter.json에서 기타 설정 가져오기 (이미 로드됨)
+inputs_from_config = config.get('inputs', [])
+model_list = config['models']
+max_new_tokens = config['max_new_tokens']
+cpu_enable = config.get('cpu', 'Enable').lower() != 'disable'
+batch_size = config.get('batch_size', 4)
+decoding_number = config.get('decoding_number', 'None')
+print(f"\nModel configuration:")
+print(f"  Models: {model_list}")
+print(f"  Max new tokens: {max_new_tokens}")
+print(f"  CPU enable: {cpu_enable}")
+
+if inputs_from_config:
+    print(f"\n[Step 1.6] Adding {len(inputs_from_config)} inputs from hyperparameter.json to the front...")
+    from datasets import Dataset, concatenate_datasets
+    
+    # inputs를 데이터셋으로 변환
+    inputs_dataset = Dataset.from_dict({"prompt_text": inputs_from_config})
+    
+    # 맨 앞에 추가 (inputs_dataset + ds_processed)
+    ds_processed = concatenate_datasets([inputs_dataset, ds_processed])
+    print(f"✓ Total dataset size: {len(ds_processed)} examples")
 
 if len(ds_processed) > 0:
     print(f"  First example prompt preview:")
@@ -86,15 +143,6 @@ else:
 
 print(f"Available special device: {special_device}")
 
-with open("hyperparameter.json", "r") as f:
-    hyperparams = json.load(f)
-model_list = hyperparams['models']
-inputs = hyperparams['inputs']
-print(model_list)
-print(inputs)
-print(hyperparams)
-max_new_tokens = hyperparams['max_new_tokens']
-cpu_enable = hyperparams.get('cpu', 'Enable').lower() != 'disable'
 output_dir = "/workspace/outputs"
 os.makedirs(output_dir, exist_ok=True)
 import argparse
@@ -129,7 +177,7 @@ def get_gpu_name():
     except:
         return 'CPU'
 
-def save_input_output_csv(model_name, gpu_name, input_text, output_text, csv_file_path):
+def save_input_output_csv(model_name, gpu_name, device, input_text, output_text, csv_file_path):
 
     file_exists = os.path.isfile(csv_file_path)
     with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
@@ -137,59 +185,10 @@ def save_input_output_csv(model_name, gpu_name, input_text, output_text, csv_fil
         
         # Write header only if file doesn't exist
         if not file_exists:
-            writer.writerow(["Model", "GPU", "Input", "Output"])
+            writer.writerow(["device", "model", "type", "batch_size", "Input", "Output"])
         
         # Write data
-        writer.writerow([model_name, gpu_name, input_text, output_text])
-
-def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tokens=50):
-    """
-    Step 2: Batch로 여러 prompt를 한번에 처리하는 함수
-    
-    Args:
-        model: 언어 모델
-        tokenizer: 토크나이저
-        batch_prompts: 문자열 리스트 (여러 개의 prompt)
-        device: 실행할 디바이스
-        max_new_tokens: 생성할 최대 토큰 수
-    
-    Returns:
-        생성된 텍스트 리스트
-    """
-    print(f"\n[Step 2] Processing batch of {len(batch_prompts)} prompts...")
-    
-    # Tokenize all prompts at once (batch processing)
-    inputs = tokenizer(
-        batch_prompts, 
-        return_tensors="pt", 
-        padding=True,  # 길이를 맞추기 위해 padding
-        truncation=True,  # 너무 긴 경우 자르기
-        max_length=512  # 최대 입력 길이
-    ).to(device)
-    
-    print(f"  Input shape: {inputs['input_ids'].shape}")
-    
-    # Generate outputs for the batch
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,  # Greedy decoding (deterministic)
-            pad_token_id=tokenizer.eos_token_id
-        )
-    
-    # outputs는 [입력 + 생성된 텍스트]를 포함하므로, 입력 길이만큼 잘라내기
-    input_length = inputs['input_ids'].shape[1]
-    generated_tokens = outputs[:, input_length:]  # 입력 부분 제거, 생성된 부분만 추출
-    
-    print(f"  Input length: {input_length}, Output length: {outputs.shape[1]}, Generated length: {generated_tokens.shape[1]}")
-    
-    # Decode only the generated part
-    generated_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-    
-    print(f"  ✓ Generated {len(generated_texts)} responses")
-    
-    return generated_texts
+        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, output_text])
 
 def main():
     gpu_name = get_gpu_name()
@@ -197,6 +196,22 @@ def main():
     
     # Create input-output CSV file path
     io_csv_file = f"{output_dir}/{start_time}/{gpu_name}_input_output_summary_{start_time}.csv"
+    
+    # 실행별로 하나의 activation CSV 파일 생성
+    activation_csv_file = f"{output_dir}/{start_time}/{gpu_name}_activations_per_step_{start_time}.csv"
+    csv_writer = None
+    activation_csv_handle = None
+    
+    if args_bool:  # activation 추적 활성화
+        try:
+            activation_csv_handle = open(activation_csv_file, "w", newline='', encoding='utf-8')
+            csv_writer = csv.writer(activation_csv_handle)
+            header = ["device", "model", "type", "batch_size", "index", "input", "layer", "decoding_step", "token_id", "token_text"]
+            csv_writer.writerow(header)
+        except Exception as e:
+            print(f"\nActivation tracking: FAILED ({e}) -> Proceeding without activation tracking")
+    else:
+        print(f"\nActivation tracking: DISABLED (args_bool=False)")
     for model_name in model_list:
         model_specific = model_name.split("/")[-1].lower()
         
@@ -210,14 +225,22 @@ def main():
         
         print(f"\nModel: {model_specific}")
         
+        # 모델 정보 가져오기 (activation 추적용)
+        transformer_layers = model.model.layers
+        model_hidden_size = model.config.hidden_size
+        num_layers = len(transformer_layers)
+        
+        print(f"  Model info - Hidden size: {model_hidden_size}, Layers: {num_layers}")
+        
         # Step 3: 데이터셋을 batch로 처리
         print(f"\n[Step 3] Using dataset instead of fixed inputs...")
         print(f"  Dataset size: {len(ds_processed)}")
         
         # Batch 크기 설정
-        batch_size = 4  # 한번에 4개씩 처리
-        data_len = len(ds_processed)
-        data_len = 4
+        if decoding_number == 'None':
+            data_len = len(ds_processed)
+        else:
+            data_len = decoding_number
         # 데이터셋을 batch로 나누어 처리
         for batch_start in range(0, data_len, batch_size):
             batch_end = min(batch_start + batch_size, data_len)
@@ -230,9 +253,16 @@ def main():
                 prompt = ds_processed[idx]['prompt_text'][:500]  # 너무 길면 잘라내기
                 batch_prompts.append(prompt)
             
-            # Batch inference 실행
+            # Batch inference 실행 (activation 추적 포함)
             generated_texts = process_batch_inference(
-                model, tokenizer, batch_prompts, special_device, max_new_tokens=max_new_tokens
+                model, tokenizer, batch_prompts, special_device, 
+                max_new_tokens=max_new_tokens,
+                track_activations=(csv_writer is not None),
+                csv_writer=csv_writer,
+                gpu_name=gpu_name,
+                model_specific=model_specific,
+                batch_start_idx=batch_start,
+                batch_size=batch_size
             )
             
             # 결과 출력 및 저장
@@ -246,8 +276,8 @@ def main():
                 # CSV에 저장 (원하는 경우)
                 if args_bool:
                     save_input_output_csv(
-                        model_name, gpu_name, 
-                        prompt, generated, 
+                        model_name, gpu_name, special_device,
+                        prompt, generated,
                         io_csv_file
                     )
             
@@ -362,7 +392,14 @@ def main():
             torch.cuda.ipc_collect()
     
         gc.collect()
-
+    
+    # 모든 모델 처리 완료 후 CSV 파일 닫기
+    if csv_writer is not None:
+        try:
+            activation_csv_handle.close()
+            print(f"\n✓ All activation data saved to: {activation_csv_file}")
+        except Exception as e:
+            print(f"Warning: Failed to close activation CSV file: {e}")
 
 
 if __name__ == "__main__":

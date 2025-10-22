@@ -121,12 +121,12 @@ def model_load_function(model_name):
         if torch.cuda.is_available():
             try:
                 model = model.to(special_device)
-                print(f"Model moved to {special_device}")
+                # print(f"Model moved to {special_device}")
             except Exception as move_error:
                 print(f"Could not move to GPU, keeping on CPU: {move_error}")
         
-        print(f"Model loaded successfully on {next(model.parameters()).device}")
-        print(f"parameter dtypes weight and bias and activation")
+        # print(f"Model loaded successfully on {next(model.parameters()).device}")
+        # print(f"parameter dtypes weight and bias and activation")
         activation_dtypes = []
         weight_dtypes = []
         bias_dtypes = []

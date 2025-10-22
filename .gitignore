@@ -183,6 +183,7 @@ checkpoints/
 *.csv
 logs/
 outputs/
+datas/
 
 # Temporary files
 *.tmp

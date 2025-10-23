@@ -1,21 +1,19 @@
 {
-    "max_new_tokens": 50,
-    "cpu": "Disable",
-    "batch_size": 4,
-    "decoding_number": 16,
-    "activation_checkpointing": false,
-    "token_checkpoint": true,
-    "models": [
-        "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
-        "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",
-        "RedHatAI/Meta-Llama-3.1-8B-FP8"
-    ],
-    "inputs": [
-        "Hello, how are you?"
-    ],
-    "dataset": {
-        "name": "HuggingFaceH4/ultrachat_200k",
-        "split": "test_sft",
-        "num_samples": 1024
-    }
+  "max_new_tokens": 64,
+  "cpu": "Disable",
+  "batch_size": [1, 4, 8, 16],
+  "decoding_number": 256,
+  "activation_checkpointing": false,
+  "token_checkpoint": true,
+  "models": [
+    "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
+    "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",
+    "RedHatAI/Meta-Llama-3.1-8B-FP8"
+  ],
+  "inputs": ["Hello, how are you?"],
+  "dataset": {
+    "name": "HuggingFaceH4/ultrachat_200k",
+    "split": "test_sft",
+    "num_samples": 1024
+  }
 }

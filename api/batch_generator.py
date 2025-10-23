@@ -63,7 +63,7 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
             input_ids=inputs['input_ids'],
             attention_mask=inputs['attention_mask'],  # 중요: attention_mask 명시적으로 전달
             max_new_tokens=max_new_tokens,
-            do_sample=False,  # Greedy decoding (deterministic)
+            do_sample=False,  # Greedy decoding (deterministic) - temperature/top_p not needed
             pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
         )
     

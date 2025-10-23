@@ -85,11 +85,14 @@ inputs_from_config = config.get('inputs', [])
 model_list = config['models']
 max_new_tokens = config['max_new_tokens']
 cpu_enable = config.get('cpu', 'Enable').lower() != 'disable'
-batch_size = config.get('batch_size', 4)
+batch_size_list = config.get('batch_size', [1, 4, 8, 16])
+if not isinstance(batch_size_list, list):
+    batch_size_list = [batch_size_list]  # Convert single value to list for backward compatibility
 decoding_number = config.get('decoding_number', 'None')
 print(f"\nModel configuration:")
 print(f"  Models: {model_list}")
 print(f"  Max new tokens: {max_new_tokens}")
+print(f"  Batch sizes: {batch_size_list}")
 print(f"  CPU enable: {cpu_enable}")
 
 if inputs_from_config:
@@ -241,71 +244,79 @@ def main():
         print(f"\n[Step 3] Using dataset instead of fixed inputs...")
         print(f"  Dataset size: {len(ds_processed)}")
         
-        # Batch 크기 설정
-        if decoding_number == 'None':
-            data_len = len(ds_processed)
-        else:
-            data_len = decoding_number
-        # 데이터셋을 batch로 나누어 처리
-        for batch_start in range(0, data_len, batch_size):
-            batch_end = min(batch_start + batch_size, data_len)
+        # Iterate over different batch sizes
+        for batch_size in batch_size_list:
+            print(f"\n{'='*60}")
+            print(f"Processing with batch_size = {batch_size}")
+            print(f"{'='*60}")
             
-            print(f"\n--- Processing batch {batch_start//batch_size + 1}: examples {batch_start}-{batch_end-1} ---")
-            
-            # Batch에서 prompt 텍스트 추출
-            batch_prompts = []
-            for idx in range(batch_start, batch_end):
-                prompt = ds_processed[idx]['prompt_text'][:500]  # 너무 길면 잘라내기
-                batch_prompts.append(prompt)
-            
-            # Batch inference 실행 (activation 추적 포함)
-            generated_texts, generated_token_ids, input_token_ids = process_batch_inference(
-                model, tokenizer, batch_prompts, special_device, 
-                max_new_tokens=max_new_tokens,
-                track_activations=(csv_writer is not None),
-                csv_writer=csv_writer,
-                gpu_name=gpu_name,
-                model_specific=model_specific,
-                batch_start_idx=batch_start,
-            )
-            
-            # 결과 출력 및 저장
-            for i, (generated, gen_token_ids, inp_token_ids) in enumerate(zip(generated_texts, generated_token_ids, input_token_ids)):
-                example_idx = batch_start + i
-                prompt = batch_prompts[i]
-                print(f"\n  Example {example_idx}:")
-                print(f"    Prompt    {len(prompt):10d}: {prompt}")
-                print(f"    Generated {len(generated):10d}: {generated}")
-
-            # CSV에 저장 (배치 단위로 저장)
-            if args_bool and token_checkpoint:
-                for i, (gen_token_ids, inp_token_ids) in enumerate(zip(generated_token_ids, input_token_ids)):
+            # Batch 크기 설정
+            if decoding_number == 'None':
+                data_len = len(ds_processed)
+            else:
+                data_len = decoding_number
+            # 데이터셋을 batch로 나누어 처리
+            for batch_start in range(0, data_len, batch_size):
+                batch_end = min(batch_start + batch_size, data_len)
+                
+                print(f"\n--- Processing batch {batch_start//batch_size + 1}: examples {batch_start}-{batch_end-1} ---")
+                
+                # Batch에서 prompt 텍스트 추출
+                batch_prompts = []
+                for idx in range(batch_start, batch_end):
+                    prompt = ds_processed[idx]['prompt_text'][:500]  # 너무 길면 잘라내기
+                    batch_prompts.append(prompt)
+                
+                # Batch inference 실행 (activation 추적 포함)
+                generated_texts, generated_token_ids, input_token_ids = process_batch_inference(
+                    model, tokenizer, batch_prompts, special_device, 
+                    max_new_tokens=max_new_tokens,
+                    track_activations=(csv_writer is not None),
+                    csv_writer=csv_writer,
+                    gpu_name=gpu_name,
+                    model_specific=model_specific,
+                    batch_start_idx=batch_start,
+                )
+                
+                # 결과 출력 및 저장
+                for i, (generated, gen_token_ids, inp_token_ids) in enumerate(zip(generated_texts, generated_token_ids, input_token_ids)):
+                    example_idx = batch_start + i
                     prompt = batch_prompts[i]
-                    generated = generated_texts[i]
-                    
-                    # Decode each token individually and join with |||
-                    input_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in inp_token_ids]
-                    output_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in gen_token_ids]
-                    
-                    combined_input_text = '|||'.join(input_text_tokens)
-                    combined_output_text = '|||'.join(output_text_tokens)
-                    
-                    # Token IDs also joined with |||
-                    combined_input_tokens = '|||'.join(map(str, inp_token_ids))
-                    combined_output_tokens = '|||'.join(map(str, gen_token_ids))
-                    
-                    save_input_output_csv(
-                        model_name, gpu_name, special_device,
-                        combined_input_text, combined_input_tokens, 
-                        combined_output_text, combined_output_tokens,
-                        io_csv_file
-                    )
+                    print(f"\n  Example {example_idx}:")
+                    print(f"    Prompt    {len(inp_token_ids):10d}: {prompt}")
+                    print(f"    Generated {len(gen_token_ids):10d}: {generated}")
+
+                # CSV에 저장 (배치 단위로 저장)
+                if args_bool and token_checkpoint:
+                    for i, (gen_token_ids, inp_token_ids) in enumerate(zip(generated_token_ids, input_token_ids)):
+                        prompt = batch_prompts[i]
+                        generated = generated_texts[i]
+                        
+                        # Decode each token individually and join with |||
+                        input_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in inp_token_ids]
+                        output_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in gen_token_ids]
+                        
+                        combined_input_text = '|||'.join(input_text_tokens)
+                        combined_output_text = '|||'.join(output_text_tokens)
+                        
+                        # Token IDs also joined with |||
+                        combined_input_tokens = '|||'.join(map(str, inp_token_ids))
+                        combined_output_tokens = '|||'.join(map(str, gen_token_ids))
+                        
+                        save_input_output_csv(
+                            model_name, gpu_name, special_device,
+                            combined_input_text, combined_input_tokens, 
+                            combined_output_text, combined_output_tokens,
+                            io_csv_file
+                        )
+                
+                # 메모리 정리
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                gc.collect()
             
-            # 메모리 정리
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-            gc.collect()
+            print(f"\n✓ Batch size {batch_size} completed!")
         
-        print("\n[Step 3] ✓ All batches processed!")
+        print("\n[Step 3] ✓ All batch sizes processed!")
         
         # 기존 코드 (비활성화) - 필요하면 주석 해제
         """

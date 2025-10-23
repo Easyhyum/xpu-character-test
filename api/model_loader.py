@@ -2,7 +2,7 @@
 Model loading utilities for the XPU character test project.
 """
 
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 
 
@@ -11,12 +11,12 @@ def model_load_function(model_name):
     
     try:
         if model_name == "unsloth/Meta-Llama-3.1-8B-bnb-4bit":
-            # 4-bit quantized model - uses bitsandbytes
+            # 4-bit quantized model - already quantized, just load it
+            # This model is pre-quantized, so we don't need to pass quantization_config
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map="auto" if torch.cuda.is_available() else None,
                 trust_remote_code=True,
-                load_in_4bit=True,
                 attn_implementation="eager",
                 low_cpu_mem_usage=True,
             )

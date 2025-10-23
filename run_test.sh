@@ -16,4 +16,4 @@ cp /workspace/hyperparameter.json /workspace/outputs/${START_TIME}/hyperparamete
 
 chmod -R a+x /workspace/outputs/${START_TIME}
 
-python3 /workspace/run.py --start-time "${START_TIME}" 2>&1 | tee "/workspace/outputs/${START_TIME}/run_log_${START_TIME}.log"
+python3 /workspace/test.py --start-time "${START_TIME}" 2>&1 | tee "/workspace/outputs/${START_TIME}/run_log_${START_TIME}.log"

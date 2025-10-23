@@ -1,10 +1,12 @@
 {
     "max_new_tokens": 50,
     "cpu": "Disable",
-    "batch_size": 4,
+    "batch_size": 1,
     "decoding_number": 16,
     "models": [
-        "unsloth/Meta-Llama-3.1-8B-bnb-4bit"
+        "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
+        "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",
+        "RedHatAI/Meta-Llama-3.1-8B-FP8"
     ],
     "inputs": [
         "Hello, how are you?"

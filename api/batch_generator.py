@@ -49,14 +49,16 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     ).to(device)
     
     print(f"  Input shape: {inputs['input_ids'].shape}")
+    print(f"  Attention mask shape: {inputs['attention_mask'].shape}")
     
     # Generate outputs for the batch
     with torch.no_grad():
         outputs = model.generate(
-            **inputs,
+            input_ids=inputs['input_ids'],
+            attention_mask=inputs['attention_mask'],  # 중요: attention_mask 명시적으로 전달
             max_new_tokens=max_new_tokens,
             do_sample=False,  # Greedy decoding (deterministic)
-            pad_token_id=tokenizer.eos_token_id
+            pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
         )
     
     # outputs는 [입력 + 생성된 텍스트]를 포함하므로, 입력 길이만큼 잘라내기
@@ -68,9 +70,12 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     # Decode only the generated part
     generated_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
     
+    # Extract token IDs as lists
+    generated_token_ids = [tokens.tolist() for tokens in generated_tokens]
+    
     print(f"  ✓ Generated {len(generated_texts)} responses")
     
-    return generated_texts
+    return generated_texts, generated_token_ids
 
 
 def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx):
@@ -114,9 +119,16 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
             hook = create_activation_hook(f"layer_{layer_idx}", step_activations)
             hooks.append(layer.register_forward_hook(hook))
         
-        # Forward pass (배치 전체)
+        # Forward pass (배치 전체) - attention_mask를 동적으로 업데이트
+        # 원본 입력의 attention_mask를 확장
+        current_attention_mask = torch.cat([
+            inputs['attention_mask'],
+            torch.ones((batch_size, generated_ids.size(1) - inputs['attention_mask'].size(1)), 
+                      dtype=inputs['attention_mask'].dtype, device=device)
+        ], dim=1)
+        
         with torch.no_grad():
-            outputs = model(input_ids=generated_ids, attention_mask=torch.ones_like(generated_ids))
+            outputs = model(input_ids=generated_ids, attention_mask=current_attention_mask)
         
         # Remove hooks
         for hook in hooks:
@@ -191,12 +203,14 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     # 생성된 텍스트 추출 (입력 제외)
     input_lengths = inputs['attention_mask'].sum(dim=1)
     generated_texts = []
+    generated_token_ids = []
     
     for batch_idx in range(batch_size):
         input_length = input_lengths[batch_idx].item()
         generated_tokens = generated_ids[batch_idx, input_length:]
         generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
         generated_texts.append(generated_text)
+        generated_token_ids.append(generated_tokens.tolist())
     
     # 메모리 정리
     del generated_ids, inputs, next_token_ids, finished
@@ -205,4 +219,4 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     gc.collect()
     
     print(f"  ✓ Generated {len(generated_texts)} responses with activation tracking")
-    return generated_texts
+    return generated_texts, generated_token_ids

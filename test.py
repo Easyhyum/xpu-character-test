@@ -223,12 +223,19 @@ def main():
     for model_name in model_list:
         model_specific = model_name.split("/")[-1].lower()
         
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        try:
+            print(f"\nLoading tokenizer for {model_name}...")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+        except Exception as e:
+            print(f"\n⚠️  Failed to load tokenizer for {model_name}: {e}")
+            print(f"{'='*60}")
+            continue
         
         # Use the custom model loading function
         model = model_load_function(model_name)
         if model is None:
-            print(f"Skipping model {model_name} due to loading failure")
+            print(f"\n⚠️  Skipping model {model_name} due to model loading failure")
+            print(f"{'='*60}")
             continue
         
         print(f"\nModel: {model_specific}")

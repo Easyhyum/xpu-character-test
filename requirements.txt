@@ -5,3 +5,4 @@ accelerate==1.10.1
 bitsandbytes==0.48.1
 pyarrow==16.1.0
 datasets==3.1.0
+sentencepiece==0.2.1

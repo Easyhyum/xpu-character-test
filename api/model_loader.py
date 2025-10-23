@@ -154,5 +154,6 @@ def model_load_function(model_name):
         
     except Exception as e:
         print(f"Failed to load model {model_name}: {e}")
-        exit()
+        import traceback
+        traceback.print_exc()
         return None

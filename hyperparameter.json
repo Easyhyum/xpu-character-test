@@ -13,7 +13,6 @@
     "unsloth/Qwen3-8B-FP8",
     "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",
     "RedHatAI/Meta-Llama-3.1-8B-FP8",
-    "RedHatAI/Qwen2-1.5B-Instruct-FP8",
     "RedHatAI/Mistral-7B-Instruct-v0.3-FP8",
     "Qwen/Qwen3-8B-FP8",
     "Qwen/Qwen3-4B-FP8"

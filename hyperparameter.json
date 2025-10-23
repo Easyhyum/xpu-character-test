@@ -1,7 +1,7 @@
 {
     "max_new_tokens": 50,
     "cpu": "Disable",
-    "batch_size": 1,
+    "batch_size": 4,
     "decoding_number": 16,
     "activation_checkpointing": false,
     "token_checkpoint": true,

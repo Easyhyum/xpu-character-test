@@ -40,6 +40,10 @@ def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tok
 def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens):
     """기본 배치 처리 (activation 추적 없음)"""
     # Tokenize all prompts at once (batch processing)
+    # padding_side를 'left'로 설정 (생성 시 필요)
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = 'left'
+    
     inputs = tokenizer(
         batch_prompts, 
         return_tensors="pt", 
@@ -47,6 +51,8 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
         truncation=True,  # 너무 긴 경우 자르기
         max_length=512  # 최대 입력 길이
     ).to(device)
+    
+    tokenizer.padding_side = original_padding_side
     
     print(f"  Input shape: {inputs['input_ids'].shape}")
     print(f"  Attention mask shape: {inputs['attention_mask'].shape}")
@@ -76,9 +82,17 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     
     # Get actual input tokens for each sample (excluding padding)
     for batch_idx in range(len(batch_prompts)):
-        # Get non-padded input tokens
-        input_length = inputs['attention_mask'][batch_idx].sum().item()
-        input_tokens = inputs['input_ids'][batch_idx][:input_length].tolist()
+        # attention_mask에서 1인 부분만 추출 (왼쪽 padding 제외)
+        mask = inputs['attention_mask'][batch_idx]
+        # 왼쪽 padding을 건너뛰기 위해 mask가 1인 첫 번째 위치부터 추출
+        non_pad_indices = mask.nonzero(as_tuple=True)[0]
+        if len(non_pad_indices) > 0:
+            start_idx = non_pad_indices[0].item()
+            end_idx = non_pad_indices[-1].item() + 1
+            input_tokens = inputs['input_ids'][batch_idx][start_idx:end_idx].tolist()
+        else:
+            input_tokens = []
+        
         input_token_ids.append(input_tokens)
         
         # Get generated tokens
@@ -99,6 +113,10 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     
     print(f"\n  Processing batch with activation tracking...")
     
+    # padding_side를 'left'로 설정 (생성 시 필요)
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = 'left'
+    
     # 배치 토크나이징
     inputs = tokenizer(
         batch_prompts,
@@ -107,6 +125,8 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
         truncation=True,
         max_length=512
     ).to(device)
+    
+    tokenizer.padding_side = original_padding_side
     
     batch_size = len(batch_prompts)
     generated_ids = inputs['input_ids'].clone()
@@ -218,10 +238,19 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     input_token_ids = []
     
     for batch_idx in range(batch_size):
-        input_length = input_lengths[batch_idx].item()
+        # attention_mask에서 1인 부분만 추출 (왼쪽 padding 제외)
+        mask = inputs['attention_mask'][batch_idx]
+        # 왼쪽 padding을 건너뛰기 위해 mask가 1인 첫 번째 위치부터 추출
+        non_pad_indices = mask.nonzero(as_tuple=True)[0]
+        if len(non_pad_indices) > 0:
+            start_idx = non_pad_indices[0].item()
+            end_idx = non_pad_indices[-1].item() + 1
+            input_tokens = inputs['input_ids'][batch_idx][start_idx:end_idx].tolist()
+            input_length = end_idx
+        else:
+            input_tokens = []
+            input_length = 0
         
-        # Get input tokens (excluding padding)
-        input_tokens = inputs['input_ids'][batch_idx][:input_length].tolist()
         input_token_ids.append(input_tokens)
         
         # Get generated tokens

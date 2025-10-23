@@ -182,7 +182,7 @@ def get_gpu_name():
     except:
         return 'CPU'
 
-def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path):
+def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path, batch_size=4):
 
     file_exists = os.path.isfile(csv_file_path)
     with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
@@ -307,7 +307,7 @@ def main():
                             model_name, gpu_name, special_device,
                             combined_input_text, combined_input_tokens, 
                             combined_output_text, combined_output_tokens,
-                            io_csv_file
+                            io_csv_file, batch_size=batch_size
                         )
                 
                 # 메모리 정리

@@ -276,11 +276,27 @@ def main():
                 print(f"    Prompt    {len(prompt):10d}: {prompt}")
                 print(f"    Generated {len(generated):10d}: {generated}")
 
-                # CSV에 저장 (원하는 경우)
-                if args_bool:
+            # CSV에 저장 (배치 단위로 저장)
+            if args_bool:
+                for i, (gen_token_ids, inp_token_ids) in enumerate(zip(generated_token_ids, input_token_ids)):
+                    prompt = batch_prompts[i]
+                    generated = generated_texts[i]
+                    
+                    # Decode each token individually and join with |||
+                    input_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in inp_token_ids]
+                    output_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in gen_token_ids]
+                    
+                    combined_input_text = '|||'.join(input_text_tokens)
+                    combined_output_text = '|||'.join(output_text_tokens)
+                    
+                    # Token IDs also joined with |||
+                    combined_input_tokens = '|||'.join(map(str, inp_token_ids))
+                    combined_output_tokens = '|||'.join(map(str, gen_token_ids))
+                    
                     save_input_output_csv(
                         model_name, gpu_name, special_device,
-                        prompt, inp_token_ids, generated, gen_token_ids,
+                        combined_input_text, combined_input_tokens, 
+                        combined_output_text, combined_output_tokens,
                         io_csv_file
                     )
             

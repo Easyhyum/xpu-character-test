@@ -187,12 +187,11 @@ def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_
         if not file_exists:
             writer.writerow(["device", "model", "type", "batch_size", "input_text", "input_tokens", "output_text", "output_tokens"])
         
-        # Convert token IDs to string with '|||' separator (triple pipe is safer than single pipe)
-        input_token_str = '|||'.join(map(str, input_token_ids))
-        output_token_str = '|||'.join(map(str, output_token_ids))
+        # input_text, input_token_ids, output_text, output_token_ids are already joined strings with |||
+        # Just pass them directly without further processing
         
         # Write data
-        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, input_token_str, output_text, output_token_str])
+        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, input_token_ids, output_text, output_token_ids])
 
 def main():
     gpu_name = get_gpu_name()

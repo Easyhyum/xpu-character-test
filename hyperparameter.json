@@ -3,6 +3,8 @@
     "cpu": "Disable",
     "batch_size": 1,
     "decoding_number": 16,
+    "activation_checkpointing": false,
+    "token_checkpoint": true,
     "models": [
         "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
         "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",

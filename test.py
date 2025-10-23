@@ -150,6 +150,8 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--start-time', dest='start_time', default=None, help='Start time string (YYYYmmdd-HHMMSS) passed from the wrapper')
 args, unknown = parser.parse_known_args()
+token_checkpoint = config.get('token_checkpoint', True)
+activation_checkpointing = config.get('activation_checkpointing', False)
 print(args)
 
 args_bool = True
@@ -205,7 +207,7 @@ def main():
     csv_writer = None
     activation_csv_handle = None
     
-    if args_bool:  # activation 추적 활성화
+    if args_bool and activation_checkpointing:  # activation 추적 활성화
         try:
             activation_csv_handle = open(activation_csv_file, "w", newline='', encoding='utf-8')
             csv_writer = csv.writer(activation_csv_handle)
@@ -276,7 +278,7 @@ def main():
                 print(f"    Generated {len(generated):10d}: {generated}")
 
             # CSV에 저장 (배치 단위로 저장)
-            if args_bool:
+            if args_bool and token_checkpoint:
                 for i, (gen_token_ids, inp_token_ids) in enumerate(zip(generated_token_ids, input_token_ids)):
                     prompt = batch_prompts[i]
                     generated = generated_texts[i]

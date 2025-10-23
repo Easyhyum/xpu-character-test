@@ -70,12 +70,23 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     # Decode only the generated part
     generated_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
     
-    # Extract token IDs as lists
-    generated_token_ids = [tokens.tolist() for tokens in generated_tokens]
+    # Extract token IDs as lists (both input and generated)
+    input_token_ids = []
+    generated_token_ids = []
+    
+    # Get actual input tokens for each sample (excluding padding)
+    for batch_idx in range(len(batch_prompts)):
+        # Get non-padded input tokens
+        input_length = inputs['attention_mask'][batch_idx].sum().item()
+        input_tokens = inputs['input_ids'][batch_idx][:input_length].tolist()
+        input_token_ids.append(input_tokens)
+        
+        # Get generated tokens
+        generated_token_ids.append(generated_tokens[batch_idx].tolist())
     
     print(f"  ✓ Generated {len(generated_texts)} responses")
     
-    return generated_texts, generated_token_ids
+    return generated_texts, generated_token_ids, input_token_ids
 
 
 def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx):
@@ -204,9 +215,16 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     input_lengths = inputs['attention_mask'].sum(dim=1)
     generated_texts = []
     generated_token_ids = []
+    input_token_ids = []
     
     for batch_idx in range(batch_size):
         input_length = input_lengths[batch_idx].item()
+        
+        # Get input tokens (excluding padding)
+        input_tokens = inputs['input_ids'][batch_idx][:input_length].tolist()
+        input_token_ids.append(input_tokens)
+        
+        # Get generated tokens
         generated_tokens = generated_ids[batch_idx, input_length:]
         generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
         generated_texts.append(generated_text)
@@ -219,4 +237,4 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     gc.collect()
     
     print(f"  ✓ Generated {len(generated_texts)} responses with activation tracking")
-    return generated_texts, generated_token_ids
+    return generated_texts, generated_token_ids, input_token_ids

@@ -177,7 +177,7 @@ def get_gpu_name():
     except:
         return 'CPU'
 
-def save_input_output_csv(model_name, gpu_name, device, input_text, output_text, output_token_ids, csv_file_path):
+def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path):
 
     file_exists = os.path.isfile(csv_file_path)
     with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
@@ -185,13 +185,14 @@ def save_input_output_csv(model_name, gpu_name, device, input_text, output_text,
         
         # Write header only if file doesn't exist
         if not file_exists:
-            writer.writerow(["device", "model", "type", "batch_size", "Input", "Output", "Output Tokens"])
+            writer.writerow(["device", "model", "type", "batch_size", "input_text", "input_tokens", "output_text", "output_tokens"])
         
-        # Convert token IDs to string with '|' separator (pipe is safe for CSV)
-        token_str = '|'.join(map(str, output_token_ids))
+        # Convert token IDs to string with '|||' separator (triple pipe is safer than single pipe)
+        input_token_str = '|||'.join(map(str, input_token_ids))
+        output_token_str = '|||'.join(map(str, output_token_ids))
         
         # Write data
-        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, output_text, token_str])
+        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, input_token_str, output_text, output_token_str])
 
 def main():
     gpu_name = get_gpu_name()
@@ -257,7 +258,7 @@ def main():
                 batch_prompts.append(prompt)
             
             # Batch inference 실행 (activation 추적 포함)
-            generated_texts, generated_token_ids = process_batch_inference(
+            generated_texts, generated_token_ids, input_token_ids = process_batch_inference(
                 model, tokenizer, batch_prompts, special_device, 
                 max_new_tokens=max_new_tokens,
                 track_activations=(csv_writer is not None),
@@ -268,7 +269,7 @@ def main():
             )
             
             # 결과 출력 및 저장
-            for i, (generated, token_ids) in enumerate(zip(generated_texts, generated_token_ids)):
+            for i, (generated, gen_token_ids, inp_token_ids) in enumerate(zip(generated_texts, generated_token_ids, input_token_ids)):
                 example_idx = batch_start + i
                 prompt = batch_prompts[i]
                 print(f"\n  Example {example_idx}:")
@@ -279,7 +280,7 @@ def main():
                 if args_bool:
                     save_input_output_csv(
                         model_name, gpu_name, special_device,
-                        prompt, generated, token_ids,
+                        prompt, inp_token_ids, generated, gen_token_ids,
                         io_csv_file
                     )
             

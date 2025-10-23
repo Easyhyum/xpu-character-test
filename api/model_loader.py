@@ -2,6 +2,7 @@
 Model loading utilities for the XPU character test project.
 """
 
+# from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Qwen3VLForConditionalGeneration
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 
@@ -93,6 +94,14 @@ def model_load_function(model_name):
                 attn_implementation="eager",  # For consistency and compatibility
                 low_cpu_mem_usage=True,
             )
+        # elif model_name == "Qwen/Qwen3-VL-8B-Instruct":
+        #     model = Qwen3VLForConditionalGeneration.from_pretrained(
+        #         "Qwen/Qwen3-VL-8B-Instruct",
+        #         device_map="auto" if torch.cuda.is_available() else None,
+        #         trust_remote_code=True,
+        #         attn_implementation="eager",
+        #         low_cpu_mem_usage=True,
+        #     )
         else:
             # Default loading for other models
             model = AutoModelForCausalLM.from_pretrained(

@@ -4,7 +4,8 @@ import os
 from datetime import datetime
 path = "./result"
 create_path = "./result/result"
-extend_string_num = 20
+extend_before = 5  # Number of tokens before diff index
+extend_after = 5   # Number of tokens after diff index
 def get_output_folders():
     """Get all non-result folders from outputs directory."""
     output_dir = path
@@ -59,6 +60,12 @@ def read_input_output_files(folder_paths):
                     df = pd.read_csv(file_path)
                     df['source_folder'] = folder
                     df['source_file'] = filename
+                    
+                    # Split output_text and output_tokens by ||| and calculate token lengths
+                    df['output_token_length'] = df['output_tokens'].apply(
+                        lambda x: len(str(x).split('|||')) if pd.notna(x) else 0
+                    )
+                    
                     all_data.append(df)
                     print(f"Loaded: {file_path}")
                 except Exception as e:
@@ -127,11 +134,11 @@ def find_batch_differences(df):
     return pd.DataFrame(results)
 
 def find_device_differences(df):
-    """Find where output strings differ for same model/input/batch_size but different device."""
+    """Find where output tokens differ for same model/input_text/batch_size but different device."""
     results = []
     
-    # Group by model, Input, and batch_size
-    grouped = df.groupby(['model', 'Input', 'batch_size'])
+    # Group by model, input_text (not Input column), and batch_size
+    grouped = df.groupby(['model', 'input_text', 'batch_size'])
     
     for (model, input_text, batch_size), group in grouped:
         # Check if there are multiple devices
@@ -142,43 +149,81 @@ def find_device_differences(df):
         group = group.sort_values('device')
         
         devices = group['device'].tolist()
-        output_list = group['Output'].tolist()
+        output_tokens_list = group['output_tokens'].tolist()
+        output_text_list = group['output_text'].tolist()
+        output_token_length_list = group['output_token_length'].tolist()
         
         # Compare outputs
-        for i in range(len(output_list)):
-            for j in range(i + 1, len(output_list)):
-                output_i = str(output_list[i]) if pd.notna(output_list[i]) else ""
-                output_j = str(output_list[j]) if pd.notna(output_list[j]) else ""
+        for i in range(len(output_tokens_list)):
+            for j in range(i + 1, len(output_tokens_list)):
+                # Split tokens by |||
+                tokens_i = str(output_tokens_list[i]).split('|||') if pd.notna(output_tokens_list[i]) else []
+                tokens_j = str(output_tokens_list[j]).split('|||') if pd.notna(output_tokens_list[j]) else []
                 
-                # Find first difference index
+                text_i = str(output_text_list[i]).split('|||') if pd.notna(output_text_list[i]) else []
+                text_j = str(output_text_list[j]).split('|||') if pd.notna(output_text_list[j]) else []
+                
+                # Find first difference index in tokens
                 diff_index = -1
-                min_len = min(len(output_i), len(output_j))
+                min_len = min(len(tokens_i), len(tokens_j))
                 
-                for idx in range(min_len):
-                    if output_i[idx] != output_j[idx]:
-                        diff_index = idx
-                        break
+                # Check if outputs are empty (only padding tokens)
+                # Empty output means all tokens are padding (128004) or end tokens (128001)
+                # Filter out special tokens and check if anything meaningful remains
+                special_tokens = ['128001', '128004', '128000']  # EOS, PAD, BOS tokens
+                meaningful_tokens_i = [t for t in tokens_i if t.strip() and t.strip() not in special_tokens]
+                meaningful_tokens_j = [t for t in tokens_j if t.strip() and t.strip() not in special_tokens]
                 
-                # If no difference found but lengths differ
-                if diff_index == -1 and len(output_i) != len(output_j):
-                    diff_index = min_len
+                # Check empty status first, before checking for differences
+                if len(meaningful_tokens_i) == 0 and len(meaningful_tokens_j) == 0:
+                    # Both outputs have no meaningful tokens - mark as -2 (both empty)
+                    diff_index = -2
+                elif len(meaningful_tokens_i) == 0:
+                    # Only device_1 output is empty - mark as -3
+                    diff_index = -3
+                elif len(meaningful_tokens_j) == 0:
+                    # Only device_2 output is empty - mark as -4
+                    diff_index = -4
+                else:
+                    # Both have meaningful tokens, check for differences
+                    for idx in range(min_len):
+                        if tokens_i[idx] != tokens_j[idx]:
+                            diff_index = idx
+                            break
+                    
+                    # If no difference found but lengths differ
+                    if diff_index == -1 and len(tokens_i) != len(tokens_j):
+                        diff_index = min_len
                 
-                # Get substring up to diff_index + extend_string_num
-                end_index = diff_index + extend_string_num if diff_index >= 0 else 0
-                output_substr_1 = output_i[:end_index] if diff_index >= 0 else ""
-                output_substr_2 = output_j[:end_index] if diff_index >= 0 else ""
+                # Get substring from (diff_index - 5) to (diff_index + 5)
+                # Remove ||| separators when joining
+                # For -1, -2, -3, -4 cases, show full output text
+                if diff_index == -1 or diff_index == -2 or diff_index == -3 or diff_index == -4:
+                    # Show full output for identical or empty outputs
+                    output_substr_1 = ''.join(text_i)
+                    output_substr_2 = ''.join(text_j)
+                elif diff_index >= 0:
+                    start_index = max(0, diff_index - extend_before)
+                    end_index = min(len(text_i), diff_index + extend_after + 1)
+                    output_substr_1 = ''.join(text_i[start_index:end_index])
+                    
+                    end_index_j = min(len(text_j), diff_index + extend_after + 1)
+                    output_substr_2 = ''.join(text_j[start_index:end_index_j])
+                else:
+                    output_substr_1 = ""
+                    output_substr_2 = ""
                 
                 results.append({
                     'model': model,
-                    'Input': input_text,
+                    'input_text': input_text.replace('|||', '').replace('\n', '<br>'),
                     'batch_size': batch_size,
                     'device_1': devices[i],
                     'device_2': devices[j],
                     'first_difference_index': diff_index,
-                    'output_length_1': len(output_i),
-                    'output_length_2': len(output_j),
-                    'output_substr_device_1': output_substr_1,
-                    'output_substr_device_2': output_substr_2
+                    'output_token_length_1': output_token_length_list[i],
+                    'output_token_length_2': output_token_length_list[j],
+                    'output_substr_device_1': output_substr_1.replace('\n', '<br>'),
+                    'output_substr_device_2': output_substr_2.replace('\n', '<br>')
                 })
     
     return pd.DataFrame(results)
@@ -199,8 +244,48 @@ def select_analysis_type():
     elif user_input == "2":
         return ["device"]
     else:
-        print("Invalid selection. Defaulting to both comparisons.")
-        return ["batch", "device"]
+        print("Invalid selection. Defaulting to device comparison only.")
+        return ["device"]
+
+def create_diff_index_summary(diff_df, result_dir, timestamp, analysis_type):
+    """Create a summary of first_difference_index counts."""
+    if diff_df.empty:
+        return
+    
+    # Count occurrences of each first_difference_index value
+    summary = diff_df['first_difference_index'].value_counts().sort_index()
+    
+    # Create summary DataFrame
+    summary_df = pd.DataFrame({
+        'first_difference_index': summary.index,
+        'count': summary.values
+    })
+    
+    # Save overall summary to CSV
+    summary_file = os.path.join(result_dir, f"diff_index_summary_{analysis_type}_{timestamp}.csv")
+    summary_df.to_csv(summary_file, index=False)
+    print(f"Difference index summary saved to: {summary_file}")
+    
+    # Create summary by model
+    model_summary_list = []
+    for model in diff_df['model'].unique():
+        model_df = diff_df[diff_df['model'] == model]
+        model_counts = model_df['first_difference_index'].value_counts().sort_index()
+        
+        for idx, count in model_counts.items():
+            model_summary_list.append({
+                'model': model,
+                'first_difference_index': idx,
+                'count': count
+            })
+    
+    if model_summary_list:
+        model_summary_df = pd.DataFrame(model_summary_list)
+        model_summary_file = os.path.join(result_dir, f"diff_index_summary_by_model_{analysis_type}_{timestamp}.csv")
+        model_summary_df.to_csv(model_summary_file, index=False)
+        print(f"Difference index summary by model saved to: {model_summary_file}")
+    
+    return summary_df
 
 def main():
     """Main execution function."""
@@ -265,9 +350,8 @@ def main():
         diff_df.to_csv(output_file, index=False)
         print(f"\nResults saved to: {output_file}")
         
-        # Display summary
-        print(f"\n=== {analysis_type.upper()} Comparison Summary ===")
-        print(diff_df.to_string())
+        # Create and save diff index summary
+        create_diff_index_summary(diff_df, result_dir, timestamp, analysis_type)
     
     print(f"\n{'='*60}")
     print("All analyses completed!")

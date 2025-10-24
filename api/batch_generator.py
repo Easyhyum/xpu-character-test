@@ -39,6 +39,11 @@ def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tok
 
 def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens):
     """기본 배치 처리 (activation 추적 없음)"""
+    # Set pad_token if not set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        print(f"  Warning: pad_token was None, set to eos_token ({tokenizer.eos_token})")
+    
     # Tokenize all prompts at once (batch processing)
     # padding_side를 'left'로 설정 (생성 시 필요)
     original_padding_side = tokenizer.padding_side
@@ -105,6 +110,11 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
 
 def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx):
     """Activation 추적을 포함한 배치 처리 - 배치 단위로 디코딩하고 input별로 activation 저장"""
+    
+    # Set pad_token if not set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        print(f"  Warning: pad_token was None, set to eos_token ({tokenizer.eos_token})")
     
     # 모델 정보 가져오기
     transformer_layers = model.model.layers

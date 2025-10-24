@@ -182,7 +182,7 @@ def get_gpu_name():
     except:
         return 'CPU'
 
-def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path, batch_size=4):
+def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path, batch_size=4, data_index=0):
 
     file_exists = os.path.isfile(csv_file_path)
     with open(csv_file_path, "a", newline='', encoding='utf-8') as f:
@@ -190,13 +190,13 @@ def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_
         
         # Write header only if file doesn't exist
         if not file_exists:
-            writer.writerow(["device", "model", "type", "batch_size", "input_text", "input_tokens", "output_text", "output_tokens"])
+            writer.writerow(["device", "model", "type", "batch_size", "data_index", "input_text", "input_tokens", "output_text", "output_tokens"])
         
         # input_text, input_token_ids, output_text, output_token_ids are already joined strings with |||
         # Just pass them directly without further processing
         
         # Write data
-        writer.writerow([gpu_name, model_name, device.type, batch_size, input_text, input_token_ids, output_text, output_token_ids])
+        writer.writerow([gpu_name, model_name, device.type, batch_size, data_index, input_text, input_token_ids, output_text, output_token_ids])
 
 def main():
     gpu_name = get_gpu_name()
@@ -287,21 +287,28 @@ def main():
                 
                 # 결과 출력 및 저장
                 for i, (generated, gen_token_ids, inp_token_ids) in enumerate(zip(generated_texts, generated_token_ids, input_token_ids)):
-                    example_idx = batch_start + i
+                    data_idx = batch_start + i
                     prompt = batch_prompts[i]
-                    print(f"\n  Example {example_idx}:")
-                    print(f"    Prompt    {len(inp_token_ids):10d}: {prompt}")
+                    # Format prompt for display (replace <br> with actual newlines for readability)
+                    display_prompt = prompt.replace('<br>', '\n')
+                    print(f"\n  Example {data_idx}:")
+                    print(f"    Prompt    {len(inp_token_ids):10d}: {display_prompt}")
                     print(f"    Generated {len(gen_token_ids):10d}: {generated}")
 
                 # CSV에 저장 (배치 단위로 저장)
                 if args_bool and token_checkpoint:
                     for i, (gen_token_ids, inp_token_ids) in enumerate(zip(generated_token_ids, input_token_ids)):
+                        data_idx = batch_start + i
                         prompt = batch_prompts[i]
                         generated = generated_texts[i]
                         
                         # Decode each token individually and join with |||
                         input_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in inp_token_ids]
                         output_text_tokens = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in gen_token_ids]
+                        
+                        # Replace commas and newlines to prevent CSV parsing issues
+                        input_text_tokens = [token.replace(',', ' <comma> ').replace('\n', ' <br> ') for token in input_text_tokens]
+                        output_text_tokens = [token.replace(',', ' <comma> ').replace('\n', ' <br> ') for token in output_text_tokens]
                         
                         combined_input_text = '|||'.join(input_text_tokens)
                         combined_output_text = '|||'.join(output_text_tokens)
@@ -314,7 +321,7 @@ def main():
                             model_name, gpu_name, special_device,
                             combined_input_text, combined_input_tokens, 
                             combined_output_text, combined_output_tokens,
-                            io_csv_file, batch_size=batch_size
+                            io_csv_file, batch_size=batch_size, data_index=data_idx
                         )
                 
                 # 메모리 정리

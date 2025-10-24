@@ -285,6 +285,49 @@ def create_diff_index_summary(diff_df, result_dir, timestamp, analysis_type):
         model_summary_df.to_csv(model_summary_file, index=False)
         print(f"Difference index summary by model saved to: {model_summary_file}")
     
+    # Create summary by batch_size (if batch_size column exists)
+    if 'batch_size' in diff_df.columns:
+        batch_summary_list = []
+        for batch_size in sorted(diff_df['batch_size'].unique()):
+            batch_df = diff_df[diff_df['batch_size'] == batch_size]
+            batch_counts = batch_df['first_difference_index'].value_counts().sort_index()
+            
+            for idx, count in batch_counts.items():
+                batch_summary_list.append({
+                    'batch_size': batch_size,
+                    'first_difference_index': idx,
+                    'count': count
+                })
+        
+        if batch_summary_list:
+            batch_summary_df = pd.DataFrame(batch_summary_list)
+            batch_summary_file = os.path.join(result_dir, f"diff_index_summary_by_batch_{analysis_type}_{timestamp}.csv")
+            batch_summary_df.to_csv(batch_summary_file, index=False)
+            print(f"Difference index summary by batch size saved to: {batch_summary_file}")
+    
+    # Create summary by model and batch_size combination
+    if 'batch_size' in diff_df.columns:
+        model_batch_summary_list = []
+        for model in diff_df['model'].unique():
+            for batch_size in sorted(diff_df['batch_size'].unique()):
+                model_batch_df = diff_df[(diff_df['model'] == model) & (diff_df['batch_size'] == batch_size)]
+                if not model_batch_df.empty:
+                    model_batch_counts = model_batch_df['first_difference_index'].value_counts().sort_index()
+                    
+                    for idx, count in model_batch_counts.items():
+                        model_batch_summary_list.append({
+                            'model': model,
+                            'batch_size': batch_size,
+                            'first_difference_index': idx,
+                            'count': count
+                        })
+        
+        if model_batch_summary_list:
+            model_batch_summary_df = pd.DataFrame(model_batch_summary_list)
+            model_batch_summary_file = os.path.join(result_dir, f"diff_index_summary_by_model_batch_{analysis_type}_{timestamp}.csv")
+            model_batch_summary_df.to_csv(model_batch_summary_file, index=False)
+            print(f"Difference index summary by model and batch size saved to: {model_batch_summary_file}")
+    
     return summary_df
 
 def main():

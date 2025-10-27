@@ -205,21 +205,6 @@ def main():
     # Create input-output CSV file path
     io_csv_file = f"{output_dir}/{start_time}/{gpu_name}_input_output_summary_{start_time}.csv"
     
-    # 실행별로 하나의 activation CSV 파일 생성
-    activation_csv_file = f"{output_dir}/{start_time}/{gpu_name}_activations_per_step_{start_time}.csv"
-    csv_writer = None
-    activation_csv_handle = None
-    
-    if args_bool and activation_checkpointing:  # activation 추적 활성화
-        try:
-            activation_csv_handle = open(activation_csv_file, "w", newline='', encoding='utf-8')
-            csv_writer = csv.writer(activation_csv_handle)
-            header = ["device", "model", "type", "batch_size", "index", "input", "layer", "decoding_step", "token_id", "token_text"]
-            csv_writer.writerow(header)
-        except Exception as e:
-            print(f"\nActivation tracking: FAILED ({e}) -> Proceeding without activation tracking")
-    else:
-        print(f"\nActivation tracking: DISABLED (args_bool=False)")
     for model_name in model_list:
         model_specific = model_name.split("/")[-1].lower()
         
@@ -256,6 +241,23 @@ def main():
             print(f"\n{'='*60}")
             print(f"Processing with batch_size = {batch_size}")
             print(f"{'='*60}")
+            
+            # Model별, Batch별 activation CSV 파일 생성
+            activation_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{model_specific}_batch{batch_size}_activations_{start_time}.csv"
+            csv_writer = None
+            activation_csv_handle = None
+            
+            if args_bool and activation_checkpointing:  # activation 추적 활성화
+                try:
+                    activation_csv_handle = open(activation_csv_file, "w", newline='', encoding='utf-8')
+                    csv_writer = csv.writer(activation_csv_handle)
+                    header = ["device", "model", "type", "batch_size", "index", "input", "layer", "decoding_step", "token_id", "token_text"]
+                    csv_writer.writerow(header)
+                    print(f"  Activation tracking: ENABLED -> {activation_csv_file}")
+                except Exception as e:
+                    print(f"  Activation tracking: FAILED ({e}) -> Proceeding without activation tracking")
+            else:
+                print(f"  Activation tracking: DISABLED")
             
             # Batch 크기 설정
             if decoding_number == 'None':
@@ -327,6 +329,14 @@ def main():
                 # 메모리 정리
                 torch.cuda.empty_cache() if torch.cuda.is_available() else None
                 gc.collect()
+            
+            # 각 batch size별 activation CSV 파일 닫기
+            if csv_writer is not None and activation_csv_handle is not None:
+                try:
+                    activation_csv_handle.close()
+                    print(f"  ✓ Activation data saved to: {activation_csv_file}")
+                except Exception as e:
+                    print(f"  Warning: Failed to close activation CSV file: {e}")
             
             print(f"\n✓ Batch size {batch_size} completed!")
         
@@ -437,14 +447,6 @@ def main():
             torch.cuda.ipc_collect()
     
         gc.collect()
-    
-    # 모든 모델 처리 완료 후 CSV 파일 닫기
-    if csv_writer is not None:
-        try:
-            activation_csv_handle.close()
-            print(f"\n✓ All activation data saved to: {activation_csv_file}")
-        except Exception as e:
-            print(f"Warning: Failed to close activation CSV file: {e}")
 
 
 if __name__ == "__main__":

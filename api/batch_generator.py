@@ -200,7 +200,7 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
                 token_text = tokenizer.decode(next_token_ids[batch_idx], skip_special_tokens=False)
                 token_text = token_text.replace('\n', '\\n').replace(',', '[COMMA]')
                 
-                # 각 layer의 activation 저장
+                # 각 layer의 activation 저장 (model_specific은 이미 safe한 이름으로 전달됨)
                 for layer_idx in range(num_layers):
                     layer_name = f"layer_{layer_idx}"
                     if layer_name in step_activations:

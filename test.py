@@ -206,7 +206,8 @@ def main():
     io_csv_file = f"{output_dir}/{start_time}/{gpu_name}_input_output_summary_{start_time}.csv"
     
     for model_name in model_list:
-        model_specific = model_name.split("/")[-1].lower()
+        # Use full model path to avoid conflicts (e.g., unsloth/Qwen3-8B-FP8 vs Qwen/Qwen3-8B-FP8)
+        model_specific = model_name.replace("/", "_").replace("-", "_").lower()
         
         try:
             print(f"\nLoading tokenizer for {model_name}...")

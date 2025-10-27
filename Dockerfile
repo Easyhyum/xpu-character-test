@@ -11,15 +11,18 @@ RUN python3 -m pip install --upgrade pip
 # Copy requirements first for better caching
 COPY requirements.txt /workspace/
 
-COPY run.py /workspace/
+COPY test.py /workspace/
 COPY api/ /workspace/api/
 
 COPY hyperparameter.json /workspace/
-COPY run.sh /workspace/
+COPY run_test.sh /workspace/
 
 RUN pip3 install -r requirements.txt
 
-RUN chmod +x /workspace/run.sh
+RUN chmod +x /workspace/run_test.sh
 
 # 인터랙티브 bash 쉘로 시작
 CMD ["/bin/bash"]
+
+## Docker Window Command Prompt: docker run --runtime=nvidia -it -v %cd%:/workspace xpu-test
+## Docker Ubuntu Terminal Prompt: docker run --runtime=nvidia -it -v $(pwd):/workspace xpu-test

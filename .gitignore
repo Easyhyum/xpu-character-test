@@ -184,6 +184,7 @@ checkpoints/
 logs/
 outputs/
 datas/
+result/
 
 # Temporary files
 *.tmp

@@ -217,13 +217,27 @@ def main():
             print(f"{'='*60}")
             continue
         
-        # Use the custom model loading function
-        model = model_load_function(model_name)
+        # Use the custom model loading function (retry up to 3 times)
+        model = None
+        for attempt in range(3):
+            try:
+                model = model_load_function(model_name)
+                if model is not None:
+                    break
+            except Exception as e:
+                print(f"\n⚠️  Model loading attempt {attempt+1} failed for {model_name}: {e}")
+            # Memory cleanup between retries
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                torch.cuda.ipc_collect()
+            gc.collect()
+            time.sleep(2)
         if model is None:
-            print(f"\n⚠️  Skipping model {model_name} due to model loading failure")
+            print(f"\n⚠️  Skipping model {model_name} due to model loading failure after 3 attempts")
             print(f"{'='*60}")
             continue
-        
+
         print(f"\nModel: {model_specific}")
         
         # 모델 정보 가져오기 (activation 추적용)

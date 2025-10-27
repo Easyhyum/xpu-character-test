@@ -321,6 +321,181 @@ def create_diff_index_summary(diff_df, result_dir, timestamp, analysis_type):
     
     return summary_files
 
+def create_device_count_csv(diff_df, result_dir, timestamp):
+
+    if diff_df.empty or 'device_pair' not in diff_df.columns:
+        return
+
+    print(f"\nCreating device count CSV...")
+
+    # Filter out first_difference_index <= -2
+    df_filtered = diff_df[diff_df['first_difference_index'] > -2].copy()
+    
+    if df_filtered.empty:
+        print("  No data remaining after filtering (all first_difference_index <= -2)")
+        return
+    
+    # Get unique values
+    models = sorted(df_filtered['model'].unique())
+    device_pairs = sorted(df_filtered['device_pair'].unique())
+    batch_sizes = sorted(df_filtered['batch_size'].unique())
+    
+    # Get all unique first_difference_index values
+    all_indices = sorted(df_filtered['first_difference_index'].unique())
+    
+    # Prepare rows for CSV
+    rows = []
+    
+    for model in models:
+        model_df = df_filtered[df_filtered['model'] == model]
+        
+        for device_pair in device_pairs:
+            # Split device_pair into device1 and device2
+            devices = device_pair.split('_vs_')
+            if len(devices) != 2:
+                continue
+            device1, device2 = devices
+            
+            pair_df = model_df[model_df['device_pair'] == device_pair]
+            
+            for batch_size in batch_sizes:
+                batch_df = pair_df[pair_df['batch_size'] == batch_size]
+                
+                if batch_df.empty:
+                    continue
+                
+                # Count occurrences of each first_difference_index
+                total_count = len(batch_df)
+                index_counts = batch_df['first_difference_index'].value_counts().to_dict()
+                
+                # Create row with percentages
+                row = {
+                    'model': model,
+                    'device1': device1,
+                    'device2': device2,
+                    'batch': batch_size
+                }
+                
+                # Add count for each index
+                for idx in all_indices:
+                    count = index_counts.get(idx, 0)
+                    row[str(idx)] = f"{count}"
+                
+                rows.append(row)
+    
+    if not rows:
+        print("  No data to save")
+        return
+    
+    # Create DataFrame
+    import pandas as pd
+    count_df = pd.DataFrame(rows)
+
+    # Reorder columns: model, device1, device2, batch, then index columns in order
+    base_cols = ['model', 'device1', 'device2', 'batch']
+    index_cols = [str(idx) for idx in all_indices]
+    column_order = base_cols + index_cols
+    
+    # Only include columns that exist
+    column_order = [col for col in column_order if col in count_df.columns]
+    count_df = count_df[column_order]
+    
+    # Save to CSV
+    csv_file = os.path.join(result_dir, f"device_count_distribution_{timestamp}.csv")
+    count_df.to_csv(csv_file, index=False)
+    print(f"  Device count CSV saved to: {csv_file}")
+    print(f"  Rows: {len(count_df)}, Columns: {len(count_df.columns)}")
+
+def create_device_percentage_csv(diff_df, result_dir, timestamp):
+    """
+    Create CSV with percentage distribution of first_difference_index by model, device_pair, and batch_size.
+    Excludes first_difference_index <= -2 from the calculation.
+    Columns: model, device1, device2, batch, -1, 0, 1, 2, ..., 64 (percentages with 2 decimal places)
+    """
+    if diff_df.empty or 'device_pair' not in diff_df.columns:
+        return
+    
+    print(f"\nCreating device percentage CSV...")
+    
+    # Filter out first_difference_index <= -2
+    df_filtered = diff_df[diff_df['first_difference_index'] > -2].copy()
+    
+    if df_filtered.empty:
+        print("  No data remaining after filtering (all first_difference_index <= -2)")
+        return
+    
+    # Get unique values
+    models = sorted(df_filtered['model'].unique())
+    device_pairs = sorted(df_filtered['device_pair'].unique())
+    batch_sizes = sorted(df_filtered['batch_size'].unique())
+    
+    # Get all unique first_difference_index values
+    all_indices = sorted(df_filtered['first_difference_index'].unique())
+    
+    # Prepare rows for CSV
+    rows = []
+    
+    for model in models:
+        model_df = df_filtered[df_filtered['model'] == model]
+        
+        for device_pair in device_pairs:
+            # Split device_pair into device1 and device2
+            devices = device_pair.split('_vs_')
+            if len(devices) != 2:
+                continue
+            device1, device2 = devices
+            
+            pair_df = model_df[model_df['device_pair'] == device_pair]
+            
+            for batch_size in batch_sizes:
+                batch_df = pair_df[pair_df['batch_size'] == batch_size]
+                
+                if batch_df.empty:
+                    continue
+                
+                # Count occurrences of each first_difference_index
+                total_count = len(batch_df)
+                index_counts = batch_df['first_difference_index'].value_counts().to_dict()
+                
+                # Create row with percentages
+                row = {
+                    'model': model,
+                    'device1': device1,
+                    'device2': device2,
+                    'batch': batch_size
+                }
+                
+                # Add percentage for each index
+                for idx in all_indices:
+                    count = index_counts.get(idx, 0)
+                    percentage = (count / total_count * 100) if total_count > 0 else 0.0
+                    row[str(idx)] = f"{percentage:.2f}"
+                
+                rows.append(row)
+    
+    if not rows:
+        print("  No data to save")
+        return
+    
+    # Create DataFrame
+    import pandas as pd
+    percentage_df = pd.DataFrame(rows)
+    
+    # Reorder columns: model, device1, device2, batch, then index columns in order
+    base_cols = ['model', 'device1', 'device2', 'batch']
+    index_cols = [str(idx) for idx in all_indices]
+    column_order = base_cols + index_cols
+    
+    # Only include columns that exist
+    column_order = [col for col in column_order if col in percentage_df.columns]
+    percentage_df = percentage_df[column_order]
+    
+    # Save to CSV
+    csv_file = os.path.join(result_dir, f"device_percentage_distribution_{timestamp}.csv")
+    percentage_df.to_csv(csv_file, index=False)
+    print(f"  Device percentage CSV saved to: {csv_file}")
+    print(f"  Rows: {len(percentage_df)}, Columns: {len(percentage_df.columns)}")
+
 
 def plot_difference_analysis(summary_file, result_dir, analysis_type, timestamp, device_pair=None):
     """
@@ -873,6 +1048,11 @@ def main():
         
         # Create and save diff index summary
         summary_files = create_diff_index_summary(diff_df, result_dir, timestamp, analysis_type)
+        
+        # For device comparison, create detailed percentage CSV
+        if analysis_type == "device" and 'device_pair' in diff_df.columns:
+            create_device_percentage_csv(diff_df, result_dir, timestamp)
+            create_device_count_csv(diff_df, result_dir, timestamp)
         
         # Create plots from summaries
         if summary_files:

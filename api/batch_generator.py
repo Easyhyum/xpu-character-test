@@ -8,7 +8,7 @@ import time
 from .text_generator import create_activation_hook
 
 
-def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tokens=50, track_activations=False, csv_writer=None, gpu_name=None, model_specific=None, batch_start_idx=0):
+def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tokens=50, track_activations=False, csv_writer=None, logit_csv_writer=None, gpu_name=None, model_specific=None, batch_start_idx=0):
     """
     Step 2: Batch로 여러 prompt를 한번에 처리하는 함수 (activation 추적 기능 포함)
     
@@ -31,7 +31,7 @@ def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tok
     
     if track_activations:
         print(f"  Activation tracking: ENABLED")
-        return process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx)
+        return process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx)
     else:
         print(f"  Activation tracking: DISABLED")
         return process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens)
@@ -108,7 +108,7 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     return generated_texts, generated_token_ids, input_token_ids
 
 
-def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, gpu_name, model_specific, batch_start_idx):
+def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx):
     """Activation 추적을 포함한 배치 처리 - 배치 단위로 디코딩하고 input별로 activation 저장"""
     
     # Set pad_token if not set
@@ -189,6 +189,27 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
         
         # Write activations to CSV (배치 내 각 샘플별로)
         if csv_writer is not None:
+            #logit save
+            for batch_idx in range(batch_size):
+                # 이미 완료된 샘플은 건너뛰기
+                if finished[batch_idx]:
+                    continue
+                
+                input_index = batch_start_idx + batch_idx
+                prompt = batch_prompts[batch_idx]
+                token_id = next_token_ids[batch_idx].item()
+                token_text = tokenizer.decode(next_token_ids[batch_idx], skip_special_tokens=False)
+                token_text = token_text.replace('\n', '\\n').replace(',', '[COMMA]')
+                
+                row = [gpu_name, model_specific, device.type, batch_size, input_index, prompt[:100], step, token_id, token_text]
+                logit_values = next_token_logits[batch_idx].cpu().numpy()
+                row.extend([f"{val:.8f}" for val in logit_values])
+                logit_csv_writer.writerow(row)
+                
+                # 메모리에서 즉시 삭제
+                del logit_values
+                
+            #activation save
             for batch_idx in range(batch_size):
                 # 이미 완료된 샘플은 건너뛰기
                 if finished[batch_idx]:

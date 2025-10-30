@@ -261,7 +261,9 @@ def main():
             activation_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{model_specific}_batch{batch_size}_activations_{start_time}.csv"
             csv_writer = None
             activation_csv_handle = None
-            
+            logit_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{model_specific}_batch{batch_size}_logit_{start_time}.csv"
+            logit_csv_writer = None
+            logit_csv_handle = None
             if args_bool and activation_checkpointing:  # activation 추적 활성화
                 try:
                     activation_csv_handle = open(activation_csv_file, "w", newline='', encoding='utf-8')
@@ -271,6 +273,14 @@ def main():
                     print(f"  Activation tracking: ENABLED -> {activation_csv_file}")
                 except Exception as e:
                     print(f"  Activation tracking: FAILED ({e}) -> Proceeding without activation tracking")
+                try:
+                    logit_csv_handle = open(logit_csv_file, "w", newline='', encoding='utf-8')
+                    logit_csv_writer = csv.writer(logit_csv_handle)
+                    header = ["device", "model", "type", "batch_size", "index", "input", "decoding_step", "token_id", "token_text"]
+                    logit_csv_writer.writerow(header)
+                    print(f"  Logit tracking: ENABLED -> {logit_csv_file}")
+                except Exception as e:
+                    print(f"  Logit tracking: FAILED ({e}) -> Proceeding without logit tracking")
             else:
                 print(f"  Activation tracking: DISABLED")
             
@@ -297,6 +307,7 @@ def main():
                     max_new_tokens=max_new_tokens,
                     track_activations=(csv_writer is not None),
                     csv_writer=csv_writer,
+                    logit_csv_writer=logit_csv_writer,
                     gpu_name=gpu_name,
                     model_specific=model_specific,
                     batch_start_idx=batch_start,

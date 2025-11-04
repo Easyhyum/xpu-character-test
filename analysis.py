@@ -919,68 +919,48 @@ def plot_batch16_device_histogram(diff_df, result_dir, timestamp):
     print(f"Batch16 device comparison plot saved (all models): {plot_file}")
     
     # Additional plot: Identical vs Differences for batch_size=16
-    # Create stacked bar chart showing identical (-1) vs differences (>-1) by device pair
-    num_models = len(models)
-    fig, axes = plt.subplots(num_models, 1, figsize=(12, 6 * num_models))
-    if num_models == 1:
-        axes = [axes]
-    
-    for idx, model in enumerate(models):
-        model_df = batch16_df[batch16_df['model'] == model]
-        
-        if model_df.empty:
-            continue
-        
+    # New: x-axis is model, each bar group is a device pair, title is device1 vs device2
+    for device_pair in device_pairs:
+        device1, device2 = device_pair.split('_vs_')
         identical_data = []
         difference_data = []
-        pair_labels = []
-        
-        for device_pair in device_pairs:
-            pair_df = model_df[model_df['device_pair'] == device_pair]
-            
-            if not pair_df.empty:
-                total_count = len(pair_df)
-                
-                # Count for -1 (identical)
-                identical_count = len(pair_df[pair_df['first_difference_index'] == -1])
-                identical_pct = (identical_count / total_count) * 100
-                
-                # Count for others (differences)
-                difference_count = len(pair_df[pair_df['first_difference_index'] > -1])
-                difference_pct = (difference_count / total_count) * 100
-                
-                identical_data.append(identical_pct)
-                difference_data.append(difference_pct)
-                pair_labels.append(device_pair.replace('_', ' '))
-        
-        x_pos = range(len(pair_labels))
-        
-        # Create stacked bars
-        bars1 = axes[idx].bar(x_pos, identical_data, label='Identical (-1)', color='#2ecc71', alpha=0.8)
-        bars2 = axes[idx].bar(x_pos, difference_data, bottom=identical_data, label='Differences (>-1)', color='#e74c3c', alpha=0.8)
-        
-        axes[idx].set_xticks(x_pos)
-        axes[idx].set_xticklabels(pair_labels, rotation=15, ha='right')
-        axes[idx].set_ylabel('Percentage (%)', fontsize=11)
-        axes[idx].set_title(f'{model}', fontsize=12)
-        axes[idx].legend(fontsize=9)
-        axes[idx].grid(True, alpha=0.3, axis='y')
-        axes[idx].set_ylim(0, 100)
-        
+        model_labels = []
+        for model in models:
+            model_df = batch16_df[(batch16_df['model'] == model) & (batch16_df['device_pair'] == device_pair)]
+            if model_df.empty:
+                identical_data.append(0)
+                difference_data.append(0)
+                model_labels.append(model)
+                continue
+            total_count = len(model_df)
+            identical_count = len(model_df[model_df['first_difference_index'] == -1])
+            identical_pct = (identical_count / total_count) * 100 if total_count > 0 else 0
+            difference_count = len(model_df[model_df['first_difference_index'] > -1])
+            difference_pct = (difference_count / total_count) * 100 if total_count > 0 else 0
+            identical_data.append(identical_pct)
+            difference_data.append(difference_pct)
+            model_labels.append(model)
+        x_pos = range(len(model_labels))
+        plt.figure(figsize=(12, 6))
+        bars1 = plt.bar(x_pos, identical_data, label='Identical (-1)', color='#2ecc71', alpha=0.8)
+        bars2 = plt.bar(x_pos, difference_data, bottom=identical_data, label='Differences (>-1)', color='#e74c3c', alpha=0.8)
+        plt.xticks(x_pos, model_labels, rotation=15, ha='right')
+        plt.ylabel('Percentage (%)', fontsize=12)
+        plt.title(f'Identical vs Differences (Batch Size 16)\n{device1} vs {device2}', fontsize=14)
+        plt.legend(fontsize=10)
+        plt.grid(True, alpha=0.3, axis='y')
+        plt.ylim(0, 100)
         # Add percentage labels on bars
         for i, (ident, diff) in enumerate(zip(identical_data, difference_data)):
-            if ident > 3:  # Only show if > 3%
-                axes[idx].text(i, ident/2, f'{ident:.1f}%', ha='center', va='center', fontsize=9, fontweight='bold')
-            if diff > 3:  # Only show if > 3%
-                axes[idx].text(i, ident + diff/2, f'{diff:.1f}%', ha='center', va='center', fontsize=9, fontweight='bold')
-    
-    plt.suptitle(f'Identical vs Differences (Batch Size 16) - All Models\nComparison by Device Pair', fontsize=14, y=0.998)
-    plt.tight_layout()
-    
-    plot_file = os.path.join(plots_dir, f"batch16_identical_vs_diff_all_models_{timestamp}.png")
-    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Batch16 identical vs diff plot saved (all models): {plot_file}")
+            if ident > 3:
+                plt.text(i, ident/2, f'{ident:.1f}%', ha='center', va='center', fontsize=10, fontweight='bold')
+            if diff > 3:
+                plt.text(i, ident + diff/2, f'{diff:.1f}%', ha='center', va='center', fontsize=10, fontweight='bold')
+        plt.tight_layout()
+        plot_file = os.path.join(plots_dir, f"batch16_identical_vs_diff_{device1}_vs_{device2}_{timestamp}.png")
+        plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Batch16 identical vs diff plot saved (device pair): {plot_file}")
 
 
 def main():

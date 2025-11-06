@@ -12,6 +12,28 @@ from api import model_load_function, generate_with_activations, create_activatio
 from datasets import load_dataset, load_from_disk, disable_caching
 import traceback
 
+# Utility: export and load editable JSONL versions of preprocessed dataset
+def export_dataset_to_jsonl(ds, jsonl_path):
+    """Export a HuggingFace Dataset or iterable of dicts to newline-delimited JSON (JSONL).
+
+    Each line will be a JSON object representing one example. Existing file will be overwritten.
+    """
+    os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
+    with open(jsonl_path, 'w', encoding='utf-8') as jf:
+        for ex in ds:
+            jf.write(json.dumps(ex, ensure_ascii=False) + '\n')
+    print(f"✓ Exported preprocessed dataset to JSONL: {jsonl_path}")
+
+def load_preprocessed_from_jsonl(jsonl_path):
+    """Load an editable JSONL (one JSON per line) back into a HuggingFace Dataset.
+
+    Returns a Dataset object. This avoids using Arrow files so you can edit the JSONL and reload.
+    """
+    print(f"Loading preprocessed dataset from editable JSONL: {jsonl_path}")
+    ds = load_dataset('json', data_files=jsonl_path, split='train')
+    print(f"✓ Editable dataset loaded successfully: {len(ds)} examples")
+    return ds
+
 # datasets 캐시를 완전히 비활성화하여 cache*.arrow 파일 생성 방지
 disable_caching()
 
@@ -35,17 +57,27 @@ dataset_name_clean = dataset_name.replace('/', '_')
 local_dataset_path = f"./datas/{dataset_name_clean}_{dataset_split}_{dataset_num_samples}_processed"
 
 print("\nLoading dataset...")
-# 전처리된 데이터셋이 있는지 확인
-if os.path.exists(local_dataset_path):
+# Editable JSONL override: set environment variable EDITABLE_DATASET to path of an edited JSONL file
+editable_jsonl = "/workspace/HuggingFaceH4_ultrachat_200k_test_sft_64_processed.jsonl"
+# editable_jsonl = os.environ.get('EDITABLE_DATASET', None)
+if editable_jsonl and os.path.exists(editable_jsonl):
+    ds_processed = load_preprocessed_from_jsonl(editable_jsonl)
+elif os.path.exists(local_dataset_path):
     print(f"  Loading preprocessed dataset from cache: {local_dataset_path}")
     ds_processed = load_from_disk(local_dataset_path)
     print(f"✓ Preprocessed dataset loaded successfully: {len(ds_processed)} examples")
+    # Export editable JSONL for this cached dataset so you can edit and reload later
+    try:
+        jsonl_path = f"{local_dataset_path}.jsonl"
+        export_dataset_to_jsonl(ds_processed, jsonl_path)
+        print(f"  Editable JSONL exported to: {jsonl_path}")
+    except Exception as e:
+        print(f"  Warning: failed to export editable JSONL from cache: {e}")
 else:
     print(f"  Downloading from HuggingFace: {dataset_name}")
     # split과 num_samples를 결합하여 다운로드
     full_split = f"{dataset_split}[:{dataset_num_samples}]"
     ds = load_dataset(dataset_name, split=full_split)
-    
     print(f"✓ Dataset loaded successfully: {len(ds)} examples")
     print(f"  Features: {list(ds.features.keys())}")
 
@@ -55,13 +87,10 @@ else:
         데이터셋의 messages를 모델 입력 형태로 변환
         example['messages']는 [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}] 형태
         """
-        # messages에서 user와 assistant의 대화를 추출
-        messages = example['messages']
-        
-        # user의 첫 번째 메시지만 사용 (prompt로)
-        user_messages = [msg for msg in messages if msg['role'] == 'user']
+        messages = example.get('messages', [])
+        user_messages = [msg for msg in messages if msg.get('role') == 'user']
         if user_messages:
-            return {'prompt_text': user_messages[0]['content']}
+            return {'prompt_text': user_messages[0].get('content', '')}
         else:
             return {'prompt_text': example.get('prompt', '')}
 
@@ -80,6 +109,34 @@ else:
     ds_processed.save_to_disk(local_dataset_path)
     print(f"✓ Preprocessed dataset saved")
 
+    # Also export an editable JSONL so you can edit and reload subsets without Arrow files
+    jsonl_path = f"{local_dataset_path}.jsonl"
+    try:
+        export_dataset_to_jsonl(ds_processed, jsonl_path)
+        print(f"  You can edit and reload this file by setting EDITABLE_DATASET={jsonl_path} before running the script.")
+    except Exception as e:
+        print(f"  Warning: failed to export editable JSONL: {e}")
+    # Helper: generated dataset JSONL path builder and saver
+    # Use get_generated_jsonl_path(start_time) to get a per-run file path
+    # and save_generated_example(jsonl_path, record) to append one record (newline-delimited JSON).
+    def get_generated_jsonl_path(start_time):
+        """Return a path for saving generated examples for this run and ensure directory exists."""
+        out_dir = f"{output_dir}/{start_time}"
+        os.makedirs(out_dir, exist_ok=True)
+        return os.path.join(out_dir, f"generated_dataset_{start_time}.jsonl")
+
+    def save_generated_example(jsonl_path, record):
+        """Append a single JSON record to jsonl_path (no loading of other CSVs required).
+
+        record should be a JSON-serializable dict containing fields like:
+            {"device": ..., "model": ..., "batch_size": ..., "data_index": ..., "input_text": ..., "output_text": ..., ...}
+        """
+        try:
+            with open(jsonl_path, "a", encoding="utf-8") as jf:
+                jf.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"Warning: failed to append generated record to {jsonl_path}: {e}")
+# exit()
 # hyperparameter.json에서 기타 설정 가져오기 (이미 로드됨)
 inputs_from_config = config.get('inputs', [])
 model_list = config['models']

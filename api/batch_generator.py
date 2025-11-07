@@ -6,9 +6,10 @@ import torch
 import gc
 import time
 from .text_generator import create_activation_hook
+from .layer_operation_tracker import LayerOperationTracker
 
 
-def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tokens=50, track_activations=False, csv_writer=None, logit_csv_writer=None, gpu_name=None, model_specific=None, batch_start_idx=0):
+def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tokens=50, track_activations=False, csv_writer=None, logit_csv_writer=None, gpu_name=None, model_specific=None, batch_start_idx=0, output_dir=None, start_time=None, in_out_value_checkpointing=False):
     """
     Step 2: Batch로 여러 prompt를 한번에 처리하는 함수 (activation 추적 기능 포함)
     
@@ -20,9 +21,12 @@ def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tok
         max_new_tokens: 생성할 최대 토큰 수
         track_activations: activation 추적 여부
         csv_writer: CSV writer object (activation 저장용)
+        logit_csv_writer: CSV writer object (logit 저장용)
         gpu_name: GPU 이름
         model_specific: 모델명
         batch_start_idx: 배치 시작 인덱스
+        output_dir: Output directory for layer operation CSVs
+        start_time: Run timestamp
     
     Returns:
         생성된 텍스트 리스트
@@ -31,7 +35,7 @@ def process_batch_inference(model, tokenizer, batch_prompts, device, max_new_tok
     
     if track_activations:
         print(f"  Activation tracking: ENABLED")
-        return process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx)
+        return process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx, output_dir, start_time, in_out_value_checkpointing)
     else:
         print(f"  Activation tracking: DISABLED")
         return process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens)
@@ -108,7 +112,7 @@ def process_batch_simple(model, tokenizer, batch_prompts, device, max_new_tokens
     return generated_texts, generated_token_ids, input_token_ids
 
 
-def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx):
+def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_new_tokens, csv_writer, logit_csv_writer, gpu_name, model_specific, batch_start_idx, output_dir=None, start_time=None, in_out_value_checkpointing=False):
     """Activation 추적을 포함한 배치 처리 - 배치 단위로 디코딩하고 input별로 activation 저장"""
     
     # Set pad_token if not set
@@ -123,6 +127,25 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     
     print(f"\n  Processing batch with activation tracking...")
     
+    # Get batch size
+    batch_size = len(batch_prompts)
+    
+    # Initialize LayerOperationTracker for detailed operation I/O capture
+    layer_tracker = None
+    # print('Test', output_dir and start_time and in_out_value_checkpointing)
+    if output_dir and start_time:
+        if in_out_value_checkpointing:
+            layer_tracker = LayerOperationTracker(
+                output_dir=output_dir,
+                start_time=start_time,
+                gpu_name=gpu_name,
+                model_specific=model_specific,
+                batch_size=batch_size,
+                layer_indices=[0, -1]  # First and last layers
+            )
+            # Register hooks for detailed operation tracking
+            layer_tracker.register_hooks(model, tokenizer)
+    
     # padding_side를 'left'로 설정 (생성 시 필요)
     original_padding_side = tokenizer.padding_side
     tokenizer.padding_side = 'left'
@@ -136,9 +159,11 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
         max_length=512
     ).to(device)
     
+    print(f"  Input tensors device: {inputs['input_ids'].device}")
+    print(f"  Model device: {next(model.parameters()).device}")
+    
     tokenizer.padding_side = original_padding_side
     
-    batch_size = len(batch_prompts)
     generated_ids = inputs['input_ids'].clone()
     eos_token_id = tokenizer.eos_token_id
     
@@ -186,6 +211,28 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
             new_token_text = tokenizer.decode(next_token_ids[0], skip_special_tokens=False)
             display_text = new_token_text.replace('\n', ' \\n ')
             print(display_text, end='', flush=True)
+        
+        # Save detailed layer operation data for each sample
+        for batch_idx in range(batch_size):
+            if finished[batch_idx]:
+                continue
+            
+            input_index = batch_start_idx + batch_idx
+            prompt = batch_prompts[batch_idx]
+            token_id = next_token_ids[batch_idx].item()
+            token_text = tokenizer.decode(next_token_ids[batch_idx], skip_special_tokens=False)
+            
+            # Save layer operation data if tracker is enabled
+            # print("Test2", layer_tracker)
+            if layer_tracker is not None:
+                layer_tracker.save_step_data(
+                    input_index=input_index,
+                    decoding_step=step,
+                    input_text=prompt,
+                    output_token_id=token_id,
+                    output_text=token_text,
+                    device=gpu_name,
+                )
         
         # Write activations to CSV (배치 내 각 샘플별로)
         if csv_writer is not None:
@@ -261,6 +308,10 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
     
     end_time = time.time()
     print(f" [steps: {step+1}, tps: {(step+1)/(end_time - init_time):.2f}]")
+    
+    # Close layer operation tracker if it was initialized
+    if layer_tracker is not None:
+        layer_tracker.close()
     
     # 생성된 텍스트 추출 (입력 제외)
     input_lengths = inputs['attention_mask'].sum(dim=1)

@@ -212,6 +212,7 @@ parser.add_argument('--start-time', dest='start_time', default=None, help='Start
 args, unknown = parser.parse_known_args()
 token_checkpoint = config.get('token_checkpoint', True)
 activation_checkpointing = config.get('activation_checkpointing', False)
+in_out_value_checkpointing = config.get('in_out_value_check', False)
 print(args)
 
 args_bool = True
@@ -346,6 +347,7 @@ def main():
                 data_len = len(ds_processed)
             else:
                 data_len = request_number
+            print(data_len, batch_size)
             # 데이터셋을 batch로 나누어 처리
             for batch_start in range(0, data_len, batch_size):
                 batch_end = min(batch_start + batch_size, data_len)
@@ -362,12 +364,15 @@ def main():
                 generated_texts, generated_token_ids, input_token_ids = process_batch_inference(
                     model, tokenizer, batch_prompts, special_device, 
                     max_new_tokens=max_new_tokens,
-                    track_activations=(csv_writer is not None),
+                    track_activations= activation_checkpointing or in_out_value_checkpointing or token_checkpoint,
                     csv_writer=csv_writer,
                     logit_csv_writer=logit_csv_writer,
                     gpu_name=gpu_name,
                     model_specific=model_specific,
                     batch_start_idx=batch_start,
+                    output_dir=output_dir,
+                    start_time=start_time,
+                    in_out_value_checkpointing=in_out_value_checkpointing
                 )
                 
                 # 결과 출력 및 저장
@@ -425,102 +430,7 @@ def main():
         
         print("\n[Step 3] ✓ All batch sizes processed!")
         
-        # 기존 코드 (비활성화) - 필요하면 주석 해제
-        """
-        input_index = 0
-        for messages in inputs:
-            # 입력 처리 전 메모리 상태
-            
-            tokenized_chat = tokenizer(messages,return_tensors="pt")
-            print(f"Input: {messages}")
-
-            tokenized_inputs = tokenized_chat
-
-            transformer_layers = model.model.layers
-            model_hidden_size = model.config.hidden_size
-
-            eos_token_id = tokenizer.eos_token_id
-
-            # Generate with Special Device
-            special_generated = None
-            if special_device and False:  # Disabled - using batch inference instead
-                # CSV 파일 먼저 열고 헤더 작성
-                special_csv_file = f"{output_dir}/{start_time}/{gpu_name}_activations_per_step_{start_time}.csv"
-                
-                try:
-                    if args_bool:
-                        with open(special_csv_file, "w", newline='') as f:
-                            writer = csv.writer(f)
-                            # Write header
-                            header = ["device","model", "type", "index", "input", "layer", "decoding_step", "token_id", "token_text"]
-                            for col in range(model_hidden_size):
-                                header.append(f"hidden_col_{col}")
-                            writer.writerow(header)
-                    else:
-                        writer = None
-
-                    print(f"{special_device.type:10s} Generating: ", end='', flush=True)
-                    special_generated, step_count = generate_with_activations(
-                        input_index, gpu_name, model_specific, model, messages, tokenizer, tokenized_inputs, special_device, max_new_tokens, 
-                        temperature=0.0, csv_writer=writer, 
-                        model_hidden_size=model_hidden_size, num_layers=len(transformer_layers)
-                    )
-                    
-                    # Save input-output to CSV
-                    if special_generated is not None and args_bool:
-                        output_text = tokenizer.decode(special_generated[0], skip_special_tokens=True)
-                        save_input_output_csv(model_name, gpu_name, messages, output_text, io_csv_file)
-                    
-                    # Delete Model from device and clear GPU memory
-                    model = model.to(cpu_device)
-                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
-                    gc.collect()
-                except Exception as e:
-                    print(f"Error during generation on {special_device.type}: {e}")
-                    traceback.print_exc()
-                    assert False, "Generation failed"
-
-            if cpu_enable and False:  # Disabled - using batch inference instead
-                # CPU용 CSV 파일 먼저 열고 헤더 작성
-                cpu_csv_file = f"{output_dir}/{start_time}/{gpu_name}_{input_index}_{model_specific}_cpu_{model_specific}_activations_per_step_{start_time}.csv"
-                
-                try:
-                    with open(cpu_csv_file, "w", newline='') as f:
-                        writer = csv.writer(f)
-                        
-                        # Write header
-                        header = ["layer", "decoding_step", "token_id", "token_text"]
-                        for col in range(model_hidden_size):
-                            header.append(f"hidden_col_{col}")
-                        writer.writerow(header)
-                        
-                        print(f"{'cpu':10s} Generating: ", end='', flush=True)
-                        cpu_generated, step_count = generate_with_activations(
-                            model, tokenizer, tokenized_inputs, cpu_device, max_new_tokens, 
-                            temperature=0.0, csv_writer=writer,
-                            model_hidden_size=model_hidden_size, num_layers=len(transformer_layers)
-                        )
-                    cpu_result = True
-                    # CPU 생성 후에도 메모리 정리
-                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
-                    gc.collect()
-                except Exception as e:
-                    print(f"Error during generation on CPU: {e}")
-                    cpu_result = False
-
-            # 각 입력 처리 후 메모리 정리
-            if 'cpu_generated' in locals():
-                del cpu_generated
-            if 'special_generated' in locals():
-                del special_generated
-            if 'tokenized_inputs' in locals():
-                del tokenized_inputs
-            torch.cuda.empty_cache() if torch.cuda.is_available() else None
-            gc.collect()
-            input_index += 1
-        """  # End of commented out old code
-        
-        model = model.cpu()
+        # model = model.cpu()
         
         del model, tokenizer
         

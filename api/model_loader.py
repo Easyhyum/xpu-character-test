@@ -89,7 +89,7 @@ def model_load_function(model_name):
         elif model_name == "RedHatAI/Meta-Llama-3.1-8B-FP8":
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
-                device_map="auto" if torch.cuda.is_available() else None,
+                device_map="cuda:0" if torch.cuda.is_available() else None,
                 trust_remote_code=True,
                 attn_implementation="eager",  # For consistency and compatibility
                 low_cpu_mem_usage=True,
@@ -118,13 +118,38 @@ def model_load_function(model_name):
         else:
             special_device = None
         
-        # Now move to appropriate device if needed
-        if torch.cuda.is_available():
-            try:
-                model = model.to(special_device)
-                # print(f"Model moved to {special_device}")
-            except Exception as move_error:
-                print(f"Could not move to GPU, keeping on CPU: {move_error}")
+        # For models using device_map="auto", check if all parameters are on the same device
+        # If not, explicitly move them (important for compressed_tensors models)
+        if torch.cuda.is_available() and special_device is not None:
+            devices_found = set()
+            for param in model.parameters():
+                devices_found.add(param.device)
+            
+            if len(devices_found) > 1 or any(d.type == 'cpu' for d in devices_found):
+                print(f"  Warning: Model parameters on multiple devices: {devices_found}")
+                print(f"  Moving all parameters to {special_device}...")
+                try:
+                    # Move model to target device
+                    model = model.to(special_device)
+                    
+                    # For compressed_tensors models, also move buffers and attributes
+                    for name, module in model.named_modules():
+                        if hasattr(module, 'weight') and isinstance(module.weight, torch.Tensor):
+                            if module.weight.device != special_device:
+                                module.weight = module.weight.to(special_device)
+                        if hasattr(module, 'bias') and isinstance(module.bias, torch.Tensor):
+                            if module.bias is not None and module.bias.device != special_device:
+                                module.bias = module.bias.to(special_device)
+                        # Move any scale/zero_point attributes for quantized layers
+                        for attr_name in ['weight_scale', 'weight_zero_point', 'input_scale', 'input_zero_point']:
+                            if hasattr(module, attr_name):
+                                attr = getattr(module, attr_name)
+                                if isinstance(attr, torch.Tensor) and attr.device != special_device:
+                                    setattr(module, attr_name, attr.to(special_device))
+                    
+                    print(f"  ✓ All parameters moved to {special_device}")
+                except Exception as move_error:
+                    print(f"  Could not move to GPU, keeping on current device: {move_error}")
         
         # print(f"Model loaded successfully on {next(model.parameters()).device}")
         # print(f"parameter dtypes weight and bias and activation")

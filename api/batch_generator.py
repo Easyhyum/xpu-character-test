@@ -232,7 +232,12 @@ def process_batch_with_activations(model, tokenizer, batch_prompts, device, max_
                     output_token_id=token_id,
                     output_text=token_text,
                     device=gpu_name,
+                    batch_idx=batch_idx  # 배치 내 인덱스 전달
                 )
+        
+        # Clear layer tracker buffer after all batch samples are processed
+        if layer_tracker is not None:
+            layer_tracker.clear_step_buffer()
         
         # Write activations to CSV (배치 내 각 샘플별로)
         if csv_writer is not None:

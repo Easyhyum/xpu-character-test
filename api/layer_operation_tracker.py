@@ -56,13 +56,17 @@ class LayerOperationTracker:
             return  # Already open
         
         csv_path = self._get_csv_path(layer_idx, operation_name)
+        
+        csv_flag = os.path.exists(csv_path)
+
         handle = open(csv_path, 'a', newline='', encoding='utf-8')
         writer = csv.writer(handle)
         
         # Header: device, input_index, decoding_index, input_text, output_token_id, output_text, layer_name, feature_0, feature_1, ...
-        header = ["device", "input_index", "decoding_index", "input_text", "layer_name", "output_token_id", "output_text"]
-        # header.extend([f"feature_{i}" for i in range(num_features)])
-        writer.writerow(header)
+        if not csv_flag:
+            header = ["device", "input_index", "decoding_index", "input_text", "layer_name", "output_token_id", "output_text"]
+            # header.extend([f"feature_{i}" for i in range(num_features)])
+            writer.writerow(header)
         
         self.csv_handles[key] = handle
         self.csv_writers[key] = writer
@@ -84,14 +88,14 @@ class LayerOperationTracker:
                         # Store reference to be copied later (outside forward pass)
                         # Using .detach() creates a new tensor that shares storage but has no gradient
                         # This is safe and doesn't affect the forward pass
-                        self.current_step_data[f"{key_base}_input"] = inp.detach()
+                        self.current_step_data[f"{key_base}_input"] = inp.detach().clone()
                 
                 if capture_output and output is not None:
                     # output might be tuple (e.g., attention returns (output, attn_weights))
                     out = output[0] if isinstance(output, tuple) else output
                     if isinstance(out, torch.Tensor):
                         # Store reference to be copied later
-                        self.current_step_data[f"{key_base}_output"] = out.detach()
+                        self.current_step_data[f"{key_base}_output"] = out.detach().clone()
             except Exception as e:
                 # Silently ignore errors to avoid breaking forward pass
                 pass
@@ -217,8 +221,18 @@ class LayerOperationTracker:
                 print(f"    Warning: No known submodules found in layer {idx} for operation tracking")
         print(f"  Registered {len(self.hooks)} operation hooks")
     
-    def save_step_data(self, input_index, decoding_step, input_text, output_token_id, output_text, device):
-        """Save captured data for current decoding step to CSV files."""
+    def save_step_data(self, input_index, decoding_step, input_text, output_token_id, output_text, device, batch_idx=0):
+        """Save captured data for current decoding step to CSV files.
+        
+        Args:
+            input_index: Index of the input sample in the overall dataset
+            decoding_step: Current decoding step
+            input_text: Input text prompt
+            output_token_id: Generated token ID
+            output_text: Generated token text
+            device: Device name
+            batch_idx: Index within the batch (default: 0)
+        """
         for key, tensor in self.current_step_data.items():
             # Parse key: "layer{idx}_{operation_name}_{input|output}"
             parts = key.split('_', 2)  # layer0, operation, type
@@ -248,16 +262,22 @@ class LayerOperationTracker:
             
             full_operation_name = f"{'-'.join(parts)}"
             
-            # NOW copy to CPU and flatten (this happens AFTER forward pass is complete)
-            # Clone to ensure we don't modify the original tensor
-            tensor_cpu = tensor.clone().cpu()
+            # ===== GPU에서 slice 수행 (디바이스별 연산 차이 보존) =====
+            # text_generator.py와 동일한 방식으로 GPU에서 먼저 처리
             
-            # Flatten tensor (take last token position: [:, -1, :])
-            if tensor_cpu.dim() >= 2:
-                # Shape: (batch_size, seq_len, hidden_dim) -> take last token
-                flat = tensor_cpu[:, -1, :].flatten().numpy()
+            # Extract only the specific batch sample
+            if tensor.dim() >= 2:
+                # GPU에서 slice - 디바이스별 부동소수점 연산 차이가 여기서 발생
+                # tensor shape: (batch_size, seq_len, hidden_dim)
+                sample_tensor = tensor[batch_idx:batch_idx+1, -1, :]  # shape: (1, hidden_dim)
+                flat_gpu = sample_tensor.flatten()
             else:
-                flat = tensor_cpu.flatten().numpy()
+                # 1D tensor case (unlikely)
+                flat_gpu = tensor.flatten()
+            
+            # GPU 연산 완료 후 CPU로 이동
+            flat = flat_gpu.cpu().numpy()
+            # ===== 수정 끝 =====
             
             num_features = len(flat)
             
@@ -278,11 +298,18 @@ class LayerOperationTracker:
                 ]
                 row.extend([f"{val:.8f}" for val in flat])
                 self.csv_writers[writer_key].writerow(row)
+                # Flush immediately to ensure data is written to disk
+                self.csv_handles[writer_key].flush()
+            else:
+                print(f"WARNING: writer_key {writer_key} not found in csv_writers!")
+                print(f"Available keys: {list(self.csv_writers.keys())}")
+                print(f"Attempting to open CSV for layer {layer_idx}, operation {full_operation_name}")
             
             # Clean up
-            del tensor_cpu, flat
-        
-        # Clear buffer for next step
+            del flat_gpu, flat
+    
+    def clear_step_buffer(self):
+        """Clear the current step data buffer after all batch samples are processed."""
         self.current_step_data.clear()
     
     def remove_hooks(self):

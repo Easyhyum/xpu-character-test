@@ -56,11 +56,11 @@ class LayerOperationTracker:
             return  # Already open
         
         csv_path = self._get_csv_path(layer_idx, operation_name)
-        handle = open(csv_path, 'w', newline='', encoding='utf-8')
+        handle = open(csv_path, 'a', newline='', encoding='utf-8')
         writer = csv.writer(handle)
         
-        # Header: device, input_index, decoding_index, input_text, output_token_id, output_text, feature_0, feature_1, ...
-        header = ["device", "input_index", "decoding_index", "input_text", "output_token_id", "output_text"]
+        # Header: device, input_index, decoding_index, input_text, output_token_id, output_text, layer_name, feature_0, feature_1, ...
+        header = ["device", "input_index", "decoding_index", "input_text", "layer_name", "output_token_id", "output_text"]
         # header.extend([f"feature_{i}" for i in range(num_features)])
         writer.writerow(header)
         
@@ -235,6 +235,7 @@ class LayerOperationTracker:
                 continue
             
             # Reconstruct operation name and type
+            # print(parts)
             if 'input' in op_and_type[-1]:
                 io_type = 'input'
                 operation_name = '_'.join(op_and_type[:-1])
@@ -245,7 +246,7 @@ class LayerOperationTracker:
                 operation_name = '_'.join(op_and_type)
                 io_type = 'unknown'
             
-            full_operation_name = f"{operation_name}_{io_type}"
+            full_operation_name = f"{'-'.join(parts)}"
             
             # NOW copy to CPU and flatten (this happens AFTER forward pass is complete)
             # Clone to ensure we don't modify the original tensor
@@ -271,8 +272,9 @@ class LayerOperationTracker:
                     input_index,
                     decoding_step,
                     input_text[:100],  # Truncate to 100 chars
+                    full_operation_name,
                     output_token_id,
-                    output_text.replace('\n', '\\n').replace(',', '[COMMA]')
+                    output_text.replace('\n', '\\n').replace(',', '[COMMA]'),
                 ]
                 row.extend([f"{val:.8f}" for val in flat])
                 self.csv_writers[writer_key].writerow(row)

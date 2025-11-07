@@ -145,7 +145,7 @@ cpu_enable = config.get('cpu', 'Enable').lower() != 'disable'
 batch_size_list = config.get('batch_size', [1, 4, 8, 16])
 if not isinstance(batch_size_list, list):
     batch_size_list = [batch_size_list]  # Convert single value to list for backward compatibility
-decoding_number = config.get('decoding_number', 'None')
+request_number = config.get('request_number', 'None')
 print(f"\nModel configuration:")
 print(f"  Models: {model_list}")
 print(f"  Max new tokens: {max_new_tokens}")
@@ -342,10 +342,10 @@ def main():
                 print(f"  Activation tracking: DISABLED")
             
             # Batch 크기 설정
-            if decoding_number == 'None':
+            if request_number == 'None':
                 data_len = len(ds_processed)
             else:
-                data_len = decoding_number
+                data_len = request_number
             # 데이터셋을 batch로 나누어 처리
             for batch_start in range(0, data_len, batch_size):
                 batch_end = min(batch_start + batch_size, data_len)

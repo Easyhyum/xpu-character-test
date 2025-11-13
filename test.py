@@ -297,7 +297,16 @@ def main():
             continue
 
         print(f"\nModel: {model_specific}")
+
+        try:
+            layers = model.model.layers
+        except AttributeError:
+            print("Warning: Could not find model.model.layers - skipping layer operation tracking")
+            return
         
+        #print all layers in model
+        print("Model layers:", layers)
+        # continue
         # 모델 정보 가져오기 (activation 추적용)
         transformer_layers = model.model.layers
         model_hidden_size = model.config.hidden_size

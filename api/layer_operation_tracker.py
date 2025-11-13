@@ -10,12 +10,13 @@ Tracks operations like:
 import torch
 import csv
 import os
+import time
 
 
 class LayerOperationTracker:
     """Captures input/output tensors at each operation within first/last transformer layers."""
     
-    def __init__(self, output_dir, start_time, gpu_name, model_specific, batch_size, layer_indices=[0, -1]):
+    def __init__(self, output_dir, start_time, gpu_name, model_specific, batch_size, layer_indices=[0, -1], print_order=True):
         """
         Args:
             output_dir: Base output directory
@@ -24,6 +25,7 @@ class LayerOperationTracker:
             model_specific: Model name (safe for filename)
             batch_size: Current batch size
             layer_indices: Which layers to track (default: first and last)
+            print_order: Whether to print and log operation order (default: True)
         """
         self.output_dir = output_dir
         self.start_time = start_time
@@ -31,6 +33,7 @@ class LayerOperationTracker:
         self.model_specific = model_specific
         self.batch_size = batch_size
         self.layer_indices = layer_indices
+        self.print_order = print_order
         
         # CSV file handles and writers for each operation
         self.csv_handles = {}
@@ -41,6 +44,72 @@ class LayerOperationTracker:
         
         # Data buffer for current step
         self.current_step_data = {}
+        
+        # Operation call order tracking
+        self.operation_call_order = []
+        self.current_step_order = []
+        
+        # Model architecture info
+        self.activation_function_type = None
+        self.model_architecture = None
+        
+        # Log file for operation order
+        self.log_file_handle = None
+        if self.print_order:
+            self._open_log_file()
+    
+    def _open_log_file(self):
+        """Open a log file for recording operation order."""
+        run_dir = f"{self.output_dir}/{self.start_time}/{self.model_specific}"
+        os.makedirs(run_dir, exist_ok=True)
+        log_filename = f"{self.gpu_name}_{self.model_specific}_operation_order.log"
+        log_path = os.path.join(run_dir, log_filename)
+        
+        self.log_file_handle = open(log_path, 'w', encoding='utf-8')
+        self.log_file_handle.write(f"Operation Order Log\n")
+        self.log_file_handle.write(f"GPU: {self.gpu_name}\n")
+        self.log_file_handle.write(f"Model: {self.model_specific}\n")
+        self.log_file_handle.write(f"Batch Size: {self.batch_size}\n")
+        self.log_file_handle.write(f"Tracked Layers: {self.layer_indices}\n")
+        self.log_file_handle.write(f"Timestamp: {self.start_time}\n")
+        self.log_file_handle.write("="*80 + "\n\n")
+        
+        # Write expected architecture order
+        self._write_architecture_info()
+        
+        self.log_file_handle.flush()
+        print(f"  Opened operation order log: {log_path}")
+    
+    def _write_architecture_info(self):
+        """Write expected operation order based on known architecture patterns."""
+        # Add activation function info if detected
+        act_info = ""
+        if self.activation_function_type:
+            act_info = f" (Detected: {self.activation_function_type})"
+        
+        self.log_file_handle.write("Expected Architecture Order (LLaMA/Qwen style):\n")
+        self.log_file_handle.write("-" * 80 + "\n")
+        self.log_file_handle.write("Each Transformer Layer:\n")
+        self.log_file_handle.write("  1. input_layernorm(x) -> norm_out\n")
+        self.log_file_handle.write("  2. Attention Block (parallel input = norm_out):\n")
+        self.log_file_handle.write("     - attn_q_proj(norm_out) -> Q\n")
+        self.log_file_handle.write("     - attn_k_proj(norm_out) -> K  (parallel with Q)\n")
+        self.log_file_handle.write("     - attn_v_proj(norm_out) -> V  (parallel with Q, K)\n")
+        self.log_file_handle.write("     - attention_compute(Q, K, V) -> attn_out (not hooked)\n")
+        self.log_file_handle.write("     - attn_o_proj(attn_out) -> O\n")
+        self.log_file_handle.write("  3. residual_add: x = x + O (not hooked)\n")
+        self.log_file_handle.write("  4. post_attention_layernorm(x) -> norm_out2\n")
+        self.log_file_handle.write("  5. MLP Block (parallel input = norm_out2):\n")
+        self.log_file_handle.write("     - mlp_gate_proj(norm_out2) -> gate\n")
+        self.log_file_handle.write("     - mlp_up_proj(norm_out2) -> up  (parallel with gate)\n")
+        self.log_file_handle.write(f"     - mlp_activation(gate) -> activated{act_info}\n")
+        self.log_file_handle.write("     - element_wise_multiply(activated, up) -> combined (not hooked)\n")
+        self.log_file_handle.write("     - mlp_down_proj(combined) -> mlp_out\n")
+        self.log_file_handle.write("  6. residual_add: x = x + mlp_out (not hooked)\n")
+        self.log_file_handle.write("\n")
+        self.log_file_handle.write("Note: Operations with same input can execute in parallel.\n")
+        self.log_file_handle.write("      Hook timestamps may not reflect true dependency order.\n")
+        self.log_file_handle.write("="*80 + "\n\n")
         
     def _get_csv_path(self, layer_idx, operation_name):
         """Generate CSV file path for a specific layer and operation."""
@@ -76,6 +145,16 @@ class LayerOperationTracker:
     def _make_io_hook(self, layer_idx, operation_name, capture_input=True, capture_output=True):
         """Create a hook that captures input and/or output of a module."""
         def hook(module, input, output):
+            # Record operation call order
+            timestamp = time.time()
+            call_info = {
+                'timestamp': timestamp,
+                'layer_idx': layer_idx,
+                'operation': operation_name,
+                'phase': 'call'
+            }
+            self.current_step_order.append(call_info)
+            
             # CRITICAL: This hook must NOT modify the forward pass
             # We only observe and copy data, never modify originals
             try:
@@ -89,6 +168,10 @@ class LayerOperationTracker:
                         # Using .detach() creates a new tensor that shares storage but has no gradient
                         # This is safe and doesn't affect the forward pass
                         self.current_step_data[f"{key_base}_input"] = inp.detach().clone()
+                        
+                        # Record input shape
+                        call_info['input_shape'] = tuple(inp.shape)
+                        call_info['input_dtype'] = str(inp.dtype)
                 
                 if capture_output and output is not None:
                     # output might be tuple (e.g., attention returns (output, attn_weights))
@@ -96,9 +179,13 @@ class LayerOperationTracker:
                     if isinstance(out, torch.Tensor):
                         # Store reference to be copied later
                         self.current_step_data[f"{key_base}_output"] = out.detach().clone()
+                        
+                        # Record output shape
+                        call_info['output_shape'] = tuple(out.shape)
+                        call_info['output_dtype'] = str(out.dtype)
             except Exception as e:
                 # Silently ignore errors to avoid breaking forward pass
-                pass
+                call_info['error'] = str(e)
             
             # CRITICAL: Must return None - this tells PyTorch we're not modifying the output
             # If we return anything else, it replaces the actual output!
@@ -122,6 +209,13 @@ class LayerOperationTracker:
             return
         
         num_layers = len(layers)
+        
+        # Detect activation function type from first layer
+        if num_layers > 0 and hasattr(layers[0], 'mlp') and hasattr(layers[0].mlp, 'act_fn'):
+            act_fn = layers[0].mlp.act_fn
+            act_type = type(act_fn).__name__
+            self.activation_function_type = act_type
+            print(f"  Detected activation function: {act_type}")
         
         for idx in self.layer_indices:
             if idx < 0:
@@ -148,6 +242,18 @@ class LayerOperationTracker:
                 attn = layer.self_attn
                 
                 # Q/K/V projections
+                if hasattr(attn, 'q_norm'):
+                    h = attn.q_norm.register_forward_hook(
+                        self._make_io_hook(idx, 'attn_q_norm', capture_input=True, capture_output=True)
+                    )
+                    self.hooks.append(h)
+                
+                if hasattr(attn, 'k_norm'):
+                    h = attn.k_norm.register_forward_hook(
+                        self._make_io_hook(idx, 'attn_k_norm', capture_input=True, capture_output=True)
+                    )
+                    self.hooks.append(h)
+
                 if hasattr(attn, 'q_proj'):
                     h = attn.q_proj.register_forward_hook(
                         self._make_io_hook(idx, 'attn_q_proj', capture_input=True, capture_output=True)
@@ -202,7 +308,7 @@ class LayerOperationTracker:
                     )
                     self.hooks.append(h)
                 
-                # Activation function (captures input = before activation, output = after activation)
+                # Activation function
                 if hasattr(mlp, 'act_fn'):
                     h = mlp.act_fn.register_forward_hook(
                         self._make_io_hook(idx, 'mlp_activation', capture_input=True, capture_output=True)
@@ -221,6 +327,133 @@ class LayerOperationTracker:
                 print(f"    Warning: No known submodules found in layer {idx} for operation tracking")
         print(f"  Registered {len(self.hooks)} operation hooks")
     
+    def print_operation_order(self, decoding_step):
+        """Print and log the operation call order for the current step."""
+        if not self.print_order or not self.current_step_order:
+            return
+        
+        # Sort by timestamp
+        sorted_order = sorted(self.current_step_order, key=lambda x: x['timestamp'])
+        
+        # Group operations by layer and categorize them
+        layer_ops = {}
+        for op in sorted_order:
+            layer_idx = op['layer_idx']
+            if layer_idx not in layer_ops:
+                layer_ops[layer_idx] = []
+            layer_ops[layer_idx].append(op)
+        
+        # Prepare output lines
+        lines = []
+        lines.append(f"\n=== Operation Order for Decoding Step {decoding_step} ===")
+        lines.append("(Actual hook call order - see architecture diagram for true dependencies)")
+        lines.append("")
+        
+        seq_num = 1
+        for layer_idx in sorted(layer_ops.keys()):
+            ops = layer_ops[layer_idx]
+            
+            # Categorize operations
+            input_norm = None
+            attn_projs = []
+            attn_o = None
+            post_norm = None
+            mlp_gate = None
+            mlp_up = None
+            mlp_act = None
+            mlp_down = None
+            
+            for op in ops:
+                name = op['operation']
+                if 'input_layernorm' in name:
+                    input_norm = op
+                elif 'attn_q_proj' in name or 'attn_k_proj' in name or 'attn_v_proj' in name or 'k_norm 'in name or 'q_norm' in name:
+                    attn_projs.append(op)
+                elif 'attn_o_proj' in name:
+                    attn_o = op
+                elif 'post_attention_layernorm' in name:
+                    post_norm = op
+                elif 'mlp_gate_proj' in name:
+                    mlp_gate = op
+                elif 'mlp_up_proj' in name:
+                    mlp_up = op
+                elif 'mlp_activation' in name:
+                    mlp_act = op
+                elif 'mlp_down_proj' in name:
+                    mlp_down = op
+            
+            # Write in logical order with annotations
+            lines.append(f"Layer {layer_idx}:")
+            
+            if input_norm:
+                lines.append(self._format_op_line(seq_num, input_norm, ""))
+                seq_num += 1
+            
+            if attn_projs:
+                lines.append("  [Attention Block - Q/K/V parallel]")
+                for proj in sorted(attn_projs, key=lambda x: x['operation']):
+                    lines.append(self._format_op_line(seq_num, proj, "  (parallel)"))
+                    seq_num += 1
+            
+            if attn_o:
+                lines.append(self._format_op_line(seq_num, attn_o, "  (after attention)"))
+                seq_num += 1
+            
+            if post_norm:
+                lines.append(self._format_op_line(seq_num, post_norm, ""))
+                seq_num += 1
+            
+            if mlp_gate or mlp_up:
+                lines.append("  [MLP Block]")
+                if mlp_gate:
+                    lines.append(self._format_op_line(seq_num, mlp_gate, "  (parallel with up)"))
+                    seq_num += 1
+                if mlp_up:
+                    lines.append(self._format_op_line(seq_num, mlp_up, "  (parallel with gate)"))
+                    seq_num += 1
+                if mlp_act:
+                    act_annotation = "  (on gate output)"
+                    if self.activation_function_type:
+                        act_annotation += f" [{self.activation_function_type}]"
+                    lines.append(self._format_op_line(seq_num, mlp_act, act_annotation))
+                    seq_num += 1
+                lines.append("    → element_wise_multiply(activated_gate, up) [not hooked]")
+                if mlp_down:
+                    lines.append(self._format_op_line(seq_num, mlp_down, "  (on multiplied)"))
+                    seq_num += 1
+            
+            lines.append("")
+        
+        lines.append(f"=== Total Operations Hooked: {len(sorted_order)} ===")
+        lines.append("")
+        
+        # Print to console (only for first step to avoid spam)
+        if decoding_step == 0:
+            for line in lines:
+                print(line)
+        
+        # Write to log file
+        if self.log_file_handle:
+            for line in lines:
+                self.log_file_handle.write(line + "\n")
+            self.log_file_handle.flush()
+    
+    def _format_op_line(self, seq_num, op, annotation):
+        """Format a single operation line."""
+        operation = op['operation']
+        info_str = f"  {seq_num:3d}. {operation:30s}"
+        
+        if 'input_shape' in op:
+            info_str += f" | IN: {str(op['input_shape']):20s}"
+        if 'output_shape' in op:
+            info_str += f" | OUT: {str(op['output_shape']):20s}"
+        if annotation:
+            info_str += f" {annotation}"
+        if 'error' in op:
+            info_str += f" | ERROR: {op['error']}"
+        
+        return info_str
+    
     def save_step_data(self, input_index, decoding_step, input_text, output_token_id, output_text, device, batch_idx=0):
         """Save captured data for current decoding step to CSV files.
         
@@ -233,6 +466,10 @@ class LayerOperationTracker:
             device: Device name
             batch_idx: Index within the batch (default: 0)
         """
+        # Print and log operation order for this step (only for first batch sample to avoid spam)
+        if input_index == 0 and self.print_order:
+            self.print_operation_order(decoding_step)
+        
         for key, tensor in self.current_step_data.items():
             # Parse key: "layer{idx}_{operation_name}_{input|output}"
             parts = key.split('_', 2)  # layer0, operation, type
@@ -311,6 +548,10 @@ class LayerOperationTracker:
     def clear_step_buffer(self):
         """Clear the current step data buffer after all batch samples are processed."""
         self.current_step_data.clear()
+        # Also save operation order to history
+        if self.current_step_order:
+            self.operation_call_order.append(list(self.current_step_order))
+            self.current_step_order.clear()
     
     def remove_hooks(self):
         """Remove all registered hooks."""
@@ -324,6 +565,17 @@ class LayerOperationTracker:
     def close(self):
         """Close all CSV files and remove hooks."""
         self.remove_hooks()
+        
+        # Close log file
+        if self.log_file_handle:
+            try:
+                self.log_file_handle.write("\n" + "="*80 + "\n")
+                self.log_file_handle.write(f"Log completed\n")
+                self.log_file_handle.write(f"Total steps recorded: {len(self.operation_call_order)}\n")
+                self.log_file_handle.close()
+                print(f"  Closed operation order log file")
+            except Exception:
+                pass
         
         for handle in self.csv_handles.values():
             try:

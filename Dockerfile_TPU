@@ -1,0 +1,34 @@
+# 베이스 이미지 (그대로 유지)
+FROM us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla:r2.5.0_3.10_tpuvm
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y \
+    tmux \
+    libopenblas-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# [수정 3] pip 업그레이드
+RUN python3 -m pip install --upgrade pip
+
+COPY requirements.txt /workspace/
+
+RUN pip3 install -r requirements.txt
+
+# 소스 코드 복사 (변경이 잦은 파일일수록 아래에 배치)
+COPY test.py /workspace/
+COPY api/ /workspace/api/
+COPY hyperparameter.json /workspace/
+COPY run_test.sh /workspace/
+
+RUN chmod +x /workspace/run_test.sh
+
+# 환경 변수 설정 (TPU 사용 시 권장되는 설정, 필요 시 추가)
+ENV PJRT_DEVICE=TPU
+
+# 인터랙티브 bash 쉘로 시작
+CMD ["/bin/bash"]
+
+# 올바른 실행 명령어 (TPU VM 내부에서)
+# sudo docker run --privileged --net=host -it -v $(pwd):/workspace xpu-test

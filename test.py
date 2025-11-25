@@ -12,6 +12,9 @@ from api import model_load_function, generate_with_activations, create_activatio
 from datasets import load_dataset, load_from_disk, disable_caching
 import traceback
 
+output_dir = "/home/work/easyhyum/xpu-character-test/outputs"
+os.makedirs(output_dir, exist_ok=True)
+
 # Utility: export and load editable JSONL versions of preprocessed dataset
 def export_dataset_to_jsonl(ds, jsonl_path):
     """Export a HuggingFace Dataset or iterable of dicts to newline-delimited JSON (JSONL).
@@ -58,7 +61,7 @@ local_dataset_path = f"./datas/{dataset_name_clean}_{dataset_split}_{dataset_num
 
 print("\nLoading dataset...")
 # Editable JSONL override: set environment variable EDITABLE_DATASET to path of an edited JSONL file
-editable_jsonl = "/workspace/HuggingFaceH4_ultrachat_200k_test_sft_64_processed.jsonl"
+editable_jsonl = "/home/work/easyhyum/xpu-character-test/HuggingFaceH4_ultrachat_200k_test_sft_64_processed.jsonl"
 # editable_jsonl = os.environ.get('EDITABLE_DATASET', None)
 if editable_jsonl and os.path.exists(editable_jsonl):
     ds_processed = load_preprocessed_from_jsonl(editable_jsonl)
@@ -151,7 +154,6 @@ print(f"  Models: {model_list}")
 print(f"  Max new tokens: {max_new_tokens}")
 print(f"  Batch sizes: {batch_size_list}")
 print(f"  CPU enable: {cpu_enable}")
-
 if inputs_from_config:
     print(f"\n[Step 1.6] Adding {len(inputs_from_config)} inputs from hyperparameter.json to the front...")
     from datasets import Dataset, concatenate_datasets
@@ -203,8 +205,7 @@ else:
 
 print(f"Available special device: {special_device}")
 
-output_dir = "/workspace/outputs"
-os.makedirs(output_dir, exist_ok=True)
+
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -225,6 +226,27 @@ elif os.environ.get('START_TIME'):
 else:
     start_time = time.strftime("%Y%m%d-%H%M%S")
     args_bool = False
+
+# KV Cache 설정 로드
+kv_cache_config = config.get('kv_cache', {})
+save_kv_cache = kv_cache_config.get('save', False)
+load_kv_cache = kv_cache_config.get('load', False)
+kv_cache_config['base_dir'] = kv_cache_config.get('base_dir', f"{output_dir}/{start_time}/kv_caches")
+
+if save_kv_cache:
+    print(f"\nKV Cache Save configuration:")
+    print(f"  Save: {save_kv_cache}")
+    print(f"  Mode: {kv_cache_config.get('save_mode', 'delta')}")
+    print(f"  Base dir: {kv_cache_config['base_dir']}")
+    os.makedirs(kv_cache_config['base_dir'], exist_ok=True)
+
+if load_kv_cache:
+    print(f"\nKV Cache Load configuration:")
+    print(f"  Load: {load_kv_cache}")
+    print(f"  Load base dir: {kv_cache_config.get('load_base_dir', 'N/A')}")
+    print(f"  Load from device: {kv_cache_config.get('load_from_device', 'N/A')}")
+    print(f"  Load from batch size: {kv_cache_config.get('load_from_batch_size', 'N/A')}")
+    print(f"  Note: Model will be auto-detected from current execution")
 
 print(f"Run start_time: {start_time}")
 
@@ -381,7 +403,9 @@ def main():
                     batch_start_idx=batch_start,
                     output_dir=output_dir,
                     start_time=start_time,
-                    in_out_value_checkpointing=in_out_value_checkpointing
+                    in_out_value_checkpointing=in_out_value_checkpointing,
+                    save_kv_cache=save_kv_cache,
+                    kv_cache_config=kv_cache_config
                 )
                 
                 # 결과 출력 및 저장

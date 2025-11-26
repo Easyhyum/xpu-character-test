@@ -918,75 +918,107 @@ def plot_batch16_device_histogram(diff_df, result_dir, timestamp):
     plt.close()
     print(f"Batch16 device comparison plot saved (all models): {plot_file}")
     
-    # Additional plot: Identical only for batch_size=16 (line plot, sorted by identical percentage)
-    # New: x-axis is model, each line is a device pair, title is device1 vs device2
+    # Additional plot: Accuracy across all decoding steps (0-128) by model
+    # X-axis: decoding steps, Y-axis: accuracy, Legend: models with color by type
     for device_pair in device_pairs:
         device1, device2 = device_pair.split('_vs_')
-        identical_data = []
-        model_labels = []
-        model_data_pairs = []
-        bf_index = 0
-        int8_index = 0
-        int4_index = 0
-        fp8_index = 0
-        global_index = 0
-        for model in models:
-            model_df = batch16_df[(batch16_df['model'] == model) & (batch16_df['device_pair'] == device_pair)]
-            if model_df.empty:
-                continue
-            total_count = len(model_df)
-            identical_count = len(model_df[model_df['first_difference_index'] == -1])
-            identical_pct = (identical_count / total_count) * 100 if total_count > 0 else 0
-            
-            model_data_pairs.append((model, identical_pct))
         
-        # Sort by identical percentage in descending order (reverse sort)
-        model_data_pairs.sort(key=lambda x: x[1], reverse=True)
+        # Filter data for this device pair
+        pair_df = diff_df[(diff_df['device_pair'] == device_pair) & 
+                         (diff_df['first_difference_index'] > -2)]
         
-        
-        # Separate back into lists
-        model_labels = [pair[0] for pair in model_data_pairs]
-        identical_data = [pair[1] for pair in model_data_pairs]
-        new_model_labels = []
-        for label in model_labels:
-            if 'w8a8' in label.lower():
-                new_model_labels.append(f'{label}\n(INT8)')
-                int8_index += 1
-            elif 'bit' in label.lower():
-                new_model_labels.append(f'{label}\n(UINT4)')
-                int4_index += 1
-            elif 'FP8' in label.upper():
-                new_model_labels.append(f'{label}\n(FP8)')
-                fp8_index += 1
-            else:
-                new_model_labels.append(f'{label}\n(BF16)')
-                bf_index += 1
-            global_index += 1
-        model_labels = new_model_labels
-        if not model_labels:
+        if pair_df.empty:
             continue
         
-        x_pos = range(len(model_labels))
-        plt.figure(figsize=(12, 6))
+        # Prepare model data with colors based on type
+        model_lines = {}
+        model_colors = {}
+        model_types = {}
         
-        # Plot line graph for Identical only
-        plt.plot(x_pos, identical_data, marker='o', linewidth=2, markersize=8, color='#ff6b6b', alpha=0.8)
+        for model in models:
+            model_df = pair_df[pair_df['model'] == model]
+            if model_df.empty:
+                continue
+            
+            # Determine color and type based on model type
+            if 'w8a8' in model.lower() or 'bit' in model.lower():
+                color = '#2ecc71'  # Green for INT
+                model_type = 'INT'
+                type_order = 1
+            elif 'FP8' in model.upper():
+                color = '#e74c3c'  # Red for FP
+                model_type = 'FP'
+                type_order = 2
+            else:
+                color = '#3498db'  # Blue for BF16
+                model_type = 'BF16'
+                type_order = 0
+            
+            # Calculate accuracy for each decoding step (0 to 128)
+            decoding_steps = range(0, 129)
+            accuracies = []
+            
+            total_count = len(model_df)
+            
+            for step in decoding_steps:
+                # Count samples that are identical or differ after this step
+                identical_count = len(model_df[(model_df['first_difference_index'] == -1) | 
+                                              (model_df['first_difference_index'] >= step)])
+                accuracy = (identical_count / total_count) if total_count > 0 else 0
+                accuracies.append(accuracy)
+            
+            model_lines[model] = accuracies
+            model_colors[model] = color
+            model_types[model] = (type_order, model_type)
+            
+        if not model_lines:
+            continue
         
-        plt.xticks(x_pos, model_labels, rotation=15, ha='right', fontweight='bold')
-        plt.ylabel('accuracy', fontsize=12)
-        plt.title(f'Accuracy Within 64 Decoding Steps.\n{device1} vs {device2}', fontsize=14)
+        # Create the plot
+        plt.figure(figsize=(14, 8))
+        
+        # Sort models by type (BF16, INT, FP) then by name
+        sorted_models = sorted(model_lines.keys(), key=lambda m: (model_types[m][0], m))
+        
+        # Plot each model as a separate line
+        for model in sorted_models:
+            accuracies = model_lines[model]
+            color = model_colors[model]
+            model_type = model_types[model][1]
+            
+            plt.plot(range(0, 129), accuracies, 
+                    linewidth=2, 
+                    color=color, 
+                    alpha=0.7,
+                    label=f'[{model_type}] {model}')
+            
+            # # Add model name at the end of the line (right side)
+            # final_accuracy = accuracies[-1]
+            # plt.text(128, final_accuracy, f' {model}', 
+            #         fontsize=7, 
+            #         va='center', 
+            #         ha='left',
+            #         color=color,
+            #         fontweight='bold')
+        
+        plt.xlabel('Decoding Steps', fontsize=12)
+        plt.ylabel('Accuracy', fontsize=12)
+        plt.title(f'Accuracy by Decoding Steps\n{device1} vs {device2}', fontsize=14)
+        plt.legend(loc='lower left', fontsize=8, framealpha=0.9, ncol=2)
         plt.grid(True, alpha=0.3)
-        plt.ylim(0, 110)
+        plt.xlim(0, 135)  # Extended to make room for labels
+        plt.ylim(0, 1.05)
         
-        # Add percentage labels on points
-        for i, ident in enumerate(identical_data):
-            plt.text(i, ident + 2, f'{ident:.2f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        # # Format y-axis to show 2 decimal places
+        # from matplotlib.ticker import FormatStrFormatter
+        # ax = plt.gca()
+        # ax.yaxis.set_major_formatter(FormatStrFormatter('%.2f'))
         
         plt.tight_layout()
-        plot_file = os.path.join(plots_dir, f"batch16_identical_only_{device1}_vs_{device2}_{timestamp}.png")
+        plot_file = os.path.join(plots_dir, f"batch16_decoding_steps_{device1}_vs_{device2}_{timestamp}.png")
         plt.savefig(plot_file, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Batch16 identical only plot saved (device pair): {plot_file}")
+        print(f"Batch16 decoding steps plot saved (device pair): {plot_file}")
 
 
 def main():

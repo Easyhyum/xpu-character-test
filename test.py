@@ -12,7 +12,7 @@ from api import model_load_function, generate_with_activations, create_activatio
 from datasets import load_dataset, load_from_disk, disable_caching
 import traceback
 
-output_dir = "/home/work/easyhyum/xpu-character-test/outputs"
+output_dir = "/workspace/outputs"
 os.makedirs(output_dir, exist_ok=True)
 
 # Utility: export and load editable JSONL versions of preprocessed dataset

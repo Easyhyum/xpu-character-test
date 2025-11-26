@@ -467,8 +467,8 @@ class LayerOperationTracker:
             batch_idx: Index within the batch (default: 0)
         """
         # Print and log operation order for this step (only for first batch sample to avoid spam)
-        if input_index == 0 and self.print_order:
-            self.print_operation_order(decoding_step)
+        # if input_index == 0 and self.print_order:
+        #     self.print_operation_order(decoding_step)
         
         for key, tensor in self.current_step_data.items():
             # Parse key: "layer{idx}_{operation_name}_{input|output}"

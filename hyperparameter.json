@@ -1,12 +1,17 @@
 {
-  "max_new_tokens": 64,
+  "max_new_tokens":128,
   "cpu": "Disable",
-  "batch_size": [16],
-  "request_number": 16,
+  "batch_size": [1],
+  "request_number": 64,
   "activation_checkpointing": false,
   "token_checkpoint": true,
   "in_out_value_check": false,
-  "models": ["RedHatAI/Meta-Llama-3.1-8B-FP8"],
+  "models": [
+    "meta-llama/Llama-3.1-8B",
+    "RedHatAI/Meta-Llama-3.1-8B-FP8",
+    "RedHatAI/Meta-Llama-3.1-8B-quantized.w8a8",
+    "Qwen/Qwen3-4B-FP8"
+    ],
   "inputs": ["Hello, how are you?"],
   "dataset": {
     "name": "HuggingFaceH4/ultrachat_200k",

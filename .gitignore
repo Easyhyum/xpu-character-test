@@ -185,7 +185,12 @@ logs/
 outputs/
 datas/
 result/
-
+ref_cache/
+permute/
+matmul*/
+compare_files/
+fp_*
+errors/
 # Temporary files
 *.tmp
 *.temp

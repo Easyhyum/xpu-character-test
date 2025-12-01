@@ -11,9 +11,9 @@ import subprocess
 from api import model_load_function, generate_with_activations, create_activation_hook, process_batch_inference
 from datasets import load_dataset, load_from_disk, disable_caching
 import traceback
+##
+# output_dir = "/home/work/easyhyum/xpu-character-test/outputs" #original
 
-output_dir = "/workspace/outputs"
-os.makedirs(output_dir, exist_ok=True)
 
 # Utility: export and load editable JSONL versions of preprocessed dataset
 def export_dataset_to_jsonl(ds, jsonl_path):
@@ -179,8 +179,8 @@ def set_deterministic_mode(seed=42):
     np.random.seed(seed)
     
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    # torch.cuda.manual_seed(seed)
+    # torch.cuda.manual_seed_all(seed)
     
     set_seed(seed)
     
@@ -210,7 +210,10 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--start-time', dest='start_time', default=None, help='Start time string (YYYYmmdd-HHMMSS) passed from the wrapper')
+parser.add_argument('--path', dest='path', default=None, help='PWD path passed from the wrapper')
 args, unknown = parser.parse_known_args()
+output_dir = args.path + "/outputs"
+os.makedirs(output_dir, exist_ok=True)
 token_checkpoint = config.get('token_checkpoint', True)
 activation_checkpointing = config.get('activation_checkpointing', False)
 in_out_value_checkpointing = config.get('in_out_value_check', False)
@@ -251,16 +254,21 @@ if load_kv_cache:
 print(f"Run start_time: {start_time}")
 
 def get_gpu_name():
-    try:
-        result = subprocess.run(
-            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
-    except:
-        return 'CPU'
+    if torch.cuda.is_available():
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except:
+            return 'ERROR'
+    elif torch.backends.mps.is_available():
+        return 'MPS'
+    else:
+        return 'CPU_Only'
 
 def save_input_output_csv(model_name, gpu_name, device, input_text, input_token_ids, output_text, output_token_ids, csv_file_path, batch_size=4, data_index=0):
 

@@ -9,7 +9,6 @@ import torch
 
 def model_load_function(model_name):
     print(f"Loading model: {model_name}")
-    
     try:
         if model_name == "unsloth/Meta-Llama-3.1-8B-bnb-4bit":
             # 4-bit quantized model - already quantized, just load it
@@ -89,7 +88,7 @@ def model_load_function(model_name):
         elif model_name == "RedHatAI/Meta-Llama-3.1-8B-FP8":
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
-                device_map="cuda:0" if torch.cuda.is_available() else None,
+                device_map="auto" if torch.cuda.is_available() else None,
                 trust_remote_code=True,
                 attn_implementation="eager",  # For consistency and compatibility
                 low_cpu_mem_usage=True,
@@ -120,7 +119,7 @@ def model_load_function(model_name):
         
         # For models using device_map="auto", check if all parameters are on the same device
         # If not, explicitly move them (important for compressed_tensors models)
-        if torch.cuda.is_available() and special_device is not None:
+        if special_device is not None:
             devices_found = set()
             for param in model.parameters():
                 devices_found.add(param.device)
@@ -150,7 +149,13 @@ def model_load_function(model_name):
                     print(f"  ✓ All parameters moved to {special_device}")
                 except Exception as move_error:
                     print(f"  Could not move to GPU, keeping on current device: {move_error}")
-        
+        if torch.backends.mps.is_available():
+            # For MPS, ensure all parameters are on MPS device
+            for param in model.parameters():
+                if param.device.type != 'mps':
+                    print(f"  Moving parameter from {param.device} to mps")
+                    model = model.to(torch.device('mps'))
+                    break
         # print(f"Model loaded successfully on {next(model.parameters()).device}")
         # print(f"parameter dtypes weight and bias and activation")
         activation_dtypes = []
